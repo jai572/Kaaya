@@ -11,6 +11,10 @@ jobs:
     permissions:
       contents: read
       deployments: write
+    env:
+      # secrets can't be referenced directly in step `if:` conditions, so
+      # resolve it to a plain env var first.
+      HAS_SERVICE_ROLE_SECRET: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,7 +32,7 @@ jobs:
       # the site itself should stay reachable; only /api/* calls that need
       # Supabase admin access will fail until SUPABASE_SERVICE_ROLE_KEY exists.
       - name: Deploy (with service-role secret)
-        if: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
+        if: ${{ env.HAS_SERVICE_ROLE_SECRET == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -39,7 +43,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       - name: Deploy (service-role secret not yet configured)
-        if: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY == '' }}
+        if: ${{ env.HAS_SERVICE_ROLE_SECRET == 'false' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
