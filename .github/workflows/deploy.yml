@@ -24,7 +24,12 @@ jobs:
 
       - run: npx vite build
 
-      - uses: cloudflare/wrangler-action@v3
+      # Deploy always proceeds even if the service-role secret isn't set yet —
+      # the site itself should stay reachable; only /api/* calls that need
+      # Supabase admin access will fail until SUPABASE_SERVICE_ROLE_KEY exists.
+      - name: Deploy (with service-role secret)
+        if: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -32,3 +37,10 @@ jobs:
             SUPABASE_SERVICE_ROLE_KEY
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Deploy (service-role secret not yet configured)
+        if: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY == '' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
