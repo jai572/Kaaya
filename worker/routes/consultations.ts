@@ -1,0 +1,242 @@
+import type { Env } from "../env";
+import { adminClient } from "../lib/supabase";
+import { json, errorResponse } from "../lib/http";
+import { consultationSubmissionSchema, validateAnswerCompleteness } from "../lib/validation";
+import { recordAuditEvent } from "../lib/audit";
+import { screenConsultation } from "../../shared/ruleEngine";
+import { ALL_QUESTIONS } from "../../shared/questions";
+import type { TreatmentRuleRecord } from "../../shared/types";
+
+const QUESTION_META = new Map(ALL_QUESTIONS.map((q) => [q.key, { section: q.section, label: q.label }]));
+
+export async function submitConsultation(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("Invalid JSON body");
+  }
+
+  const parsed = consultationSubmissionSchema.safeParse(body);
+  if (!parsed.success) {
+    return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+  }
+  const submission = parsed.data;
+
+  const completeness = validateAnswerCompleteness(submission.answers);
+  if (completeness) return errorResponse(completeness);
+
+  const admin = adminClient(env);
+  const email = submission.client.email.toLowerCase();
+
+  // Selected treatments must exist and be active — never trust client-supplied names/flags.
+  const { data: treatments, error: treatmentsError } = await admin
+    .from("treatments")
+    .select("id, name, is_tint, is_eyelash, uses_adhesive, requires_patch_test")
+    .in("id", submission.treatment_ids)
+    .eq("active", true);
+
+  if (treatmentsError) return errorResponse(treatmentsError.message, 500);
+  if (!treatments || treatments.length !== submission.treatment_ids.length) {
+    return errorResponse("One or more selected treatments are invalid or unavailable");
+  }
+
+  // Reuse an existing client record by email (repeat visits), otherwise create one.
+  const { data: existingClient } = await admin.from("clients").select("id").eq("email", email).maybeSingle();
+
+  let clientId: string;
+  if (existingClient) {
+    clientId = existingClient.id;
+    await admin
+      .from("clients")
+      .update({
+        first_name: submission.client.first_name,
+        last_name: submission.client.last_name,
+        phone: submission.client.phone,
+        address: submission.client.address ?? null,
+      })
+      .eq("id", clientId);
+  } else {
+    const { data: newClient, error: clientError } = await admin
+      .from("clients")
+      .insert({
+        first_name: submission.client.first_name,
+        last_name: submission.client.last_name,
+        email,
+        phone: submission.client.phone,
+        address: submission.client.address ?? null,
+      })
+      .select("id")
+      .single();
+    if (clientError || !newClient) return errorResponse(clientError?.message ?? "Could not create client", 500);
+    clientId = newClient.id;
+  }
+
+  const { data: consultation, error: consultationError } = await admin
+    .from("consultations")
+    .insert({ client_id: clientId, status: "draft" })
+    .select("id, access_token")
+    .single();
+  if (consultationError || !consultation) {
+    return errorResponse(consultationError?.message ?? "Could not create consultation", 500);
+  }
+  const consultationId = consultation.id;
+
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "consultation_started",
+  });
+
+  const answerRows = submission.answers.map((a) => {
+    const meta = QUESTION_META.get(a.question_key);
+    if (!meta) throw new Error(`Unknown question key survived validation: ${a.question_key}`);
+    return {
+      consultation_id: consultationId,
+      section: meta.section,
+      question_key: a.question_key,
+      question_label: meta.label,
+      answer_value: a.answer_value,
+      additional_info: a.additional_info ?? null,
+    };
+  });
+  const { error: answersError } = await admin.from("consultation_answers").insert(answerRows);
+  if (answersError) return errorResponse(answersError.message, 500);
+
+  const { error: servicesError } = await admin.from("consultation_services").insert(
+    submission.treatment_ids.map((treatment_id) => ({ consultation_id: consultationId, treatment_id }))
+  );
+  if (servicesError) return errorResponse(servicesError.message, 500);
+
+  const { error: signatureError } = await admin.from("signatures").insert({
+    consultation_id: consultationId,
+    method: "typed",
+    legal_name: submission.signature.legal_name,
+    signature_value: submission.signature.signature_value,
+    is_provisional: true,
+    consent_without_patch_test: submission.signature.consent_without_patch_test,
+  });
+  if (signatureError) return errorResponse(signatureError.message, 500);
+
+  const submittedAt = new Date().toISOString();
+  await admin
+    .from("consultations")
+    .update({ status: "submitted", submitted_at: submittedAt })
+    .eq("id", consultationId);
+
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "consultation_submitted",
+  });
+
+  // --- Automated screening ---
+  const { data: rules, error: rulesError } = await admin
+    .from("treatment_rules")
+    .select("*")
+    .eq("active", true);
+  if (rulesError) return errorResponse(rulesError.message, 500);
+
+  const result = screenConsultation(
+    submission.answers,
+    treatments,
+    submission.signature,
+    (rules ?? []) as unknown as TreatmentRuleRecord[]
+  );
+
+  if (result.flags.length > 0) {
+    const { error: flagsError } = await admin.from("consultation_flags").insert(
+      result.flags.map((f) => ({
+        consultation_id: consultationId,
+        rule_id: f.rule_id,
+        rule_key: f.rule_key,
+        severity: f.severity,
+        title: f.title,
+        client_answer_summary: f.client_answer_summary,
+        explanation: f.explanation,
+        staff_action: f.staff_action,
+      }))
+    );
+    if (flagsError) return errorResponse(flagsError.message, 500);
+
+    for (const flag of result.flags) {
+      await recordAuditEvent(admin, {
+        consultation_id: consultationId,
+        actor_id: null,
+        actor_type: "system",
+        event_type: "flag_created",
+        metadata: { rule_key: flag.rule_key, severity: flag.severity },
+      });
+    }
+  }
+
+  const screenedAt = new Date().toISOString();
+  await admin
+    .from("consultations")
+    .update({ status: "pending_review", screened_at: screenedAt })
+    .eq("id", consultationId);
+
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "system",
+    event_type: "screening_completed",
+    metadata: { summary: result.summary },
+  });
+
+  return json(
+    {
+      consultation_id: consultationId,
+      access_token: consultation.access_token,
+      status: "pending_review",
+    },
+    201
+  );
+}
+
+export async function getClientConsultation(request: Request, env: Env, consultationId: string): Promise<Response> {
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token");
+  if (!token) return errorResponse("Missing token", 401);
+
+  const admin = adminClient(env);
+  const { data: consultation, error } = await admin
+    .from("consultations")
+    .select("id, status, access_token, submitted_at, created_at")
+    .eq("id", consultationId)
+    .maybeSingle();
+
+  // Same response whether not-found or token mismatch — don't leak existence.
+  if (error || !consultation || consultation.access_token !== token) {
+    return errorResponse("Not found", 404);
+  }
+
+  const [{ data: answers }, { data: services }, { data: signature }] = await Promise.all([
+    admin
+      .from("consultation_answers")
+      .select("question_key, question_label, answer_value, additional_info")
+      .eq("consultation_id", consultationId),
+    admin
+      .from("consultation_services")
+      .select("treatments(id, name)")
+      .eq("consultation_id", consultationId),
+    admin
+      .from("signatures")
+      .select("legal_name, signed_at, is_provisional")
+      .eq("consultation_id", consultationId)
+      .maybeSingle(),
+  ]);
+
+  return json({
+    id: consultation.id,
+    status: consultation.status,
+    submitted_at: consultation.submitted_at,
+    answers,
+    treatments: ((services ?? []) as unknown as { treatments: { id: string; name: string } | null }[]).map(
+      (s) => s.treatments
+    ),
+    signature,
+  });
+}

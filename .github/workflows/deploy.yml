@@ -20,7 +20,15 @@ jobs:
 
       - run: npm ci
 
+      - run: npx tsc -b
+
+      - run: npx vite build
+
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          secrets: |
+            SUPABASE_SERVICE_ROLE_KEY
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
