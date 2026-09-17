@@ -1,0 +1,12 @@
+{
+  "name": "kaaya",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.133.0"
+  }
+}

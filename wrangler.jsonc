@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kaaya",
+  "compatibility_date": "2026-09-17",
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "single-page-application"
+  },
+  "vars": {
+    "SUPABASE_URL": "https://yfsoxbcqmyzddqtqiuzj.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_IP4YtYFLbFAg6d24_GzPcw_NHXlfGsl"
+  }
+}
