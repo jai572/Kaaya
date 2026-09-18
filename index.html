@@ -7,6 +7,30 @@
 </head>
 <body>
   <div id="root"></div>
+  <!--
+    Plain-JS safety net, outside React entirely: if the module script below
+    throws during load (e.g. a missing build-time env var) or hangs, React
+    never mounts and #root stays empty with nothing in the console a
+    non-technical person would see. A blank white page reads as "the site
+    is down" with no way to know why — this at least says so.
+  -->
+  <script>
+    (function () {
+      var showFallback = function () {
+        var root = document.getElementById("root");
+        if (root && root.childElementCount === 0) {
+          root.innerHTML =
+            '<div style="max-width:480px;margin:40px auto;padding:20px;font-family:sans-serif;text-align:center;">' +
+            "<h2>Kaaya is temporarily unavailable</h2>" +
+            "<p>Please refresh the page. If this keeps happening, contact Kaaya directly.</p>" +
+            "</div>";
+        }
+      };
+      window.addEventListener("error", showFallback);
+      window.addEventListener("unhandledrejection", showFallback);
+      setTimeout(showFallback, 8000);
+    })();
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

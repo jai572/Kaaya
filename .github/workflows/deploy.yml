@@ -26,7 +26,13 @@ jobs:
 
       - run: npx tsc -b
 
+      # Same public-safe values already committed in wrangler.jsonc `vars` —
+      # Vite needs them at build time to bake into the client bundle, and
+      # CI has no .env.local (correctly gitignored), so they must be set here.
       - run: npx vite build
+        env:
+          VITE_SUPABASE_URL: https://yfsoxbcqmyzddqtqiuzj.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_IP4YtYFLbFAg6d24_GzPcw_NHXlfGsl
 
       # Deploy always proceeds even if the service-role secret isn't set yet —
       # the site itself should stay reachable; only /api/* calls that need
