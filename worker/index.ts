@@ -50,11 +50,20 @@ export default {
       }
     }
 
-    // Static assets, with SPA fallback so client-side routes (e.g. /staff/login) work on refresh.
+    // Static assets, with SPA fallback so client-side routes (e.g. /staff/login)
+    // work on direct navigation/refresh. The assets binding doesn't only 404 for
+    // an unmatched SPA route -- it can also issue its own redirect (307) while
+    // trying to resolve the path, which must NOT be passed through to the
+    // browser or every non-root route silently redirects to "/". Only a real
+    // 2xx asset match should be served as-is; anything else falls through to
+    // index.html so client-side routing can take over.
     const assetResponse = await env.ASSETS.fetch(request);
-    if (assetResponse.status !== 404) return assetResponse;
+    if (assetResponse.ok) return assetResponse;
 
-    const indexRequest = new Request(new URL("/index.html", request.url), request);
+    // Fetching "/index.html" directly triggers the assets layer's own
+    // canonicalization redirect (index.html -> /), which would just repeat
+    // the same problem. "/" resolves to the same file without a redirect.
+    const indexRequest = new Request(new URL("/", request.url), request);
     return env.ASSETS.fetch(indexRequest);
   },
 };
