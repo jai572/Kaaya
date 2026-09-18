@@ -25,7 +25,13 @@ export default function ConsultationForm() {
 
   const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [selectedTreatmentIds, setSelectedTreatmentIds] = useState<string[]>([]);
-  const [answers, setAnswers] = useState<AnswersState>({});
+  // Medical checkboxes default to false (unchecked = "No"/does not apply),
+  // same as reading a paper form — a box that was never touched still means
+  // something. Without this, a client with no conditions to report would
+  // have to click all ~29 boxes just to make the Next button notice.
+  const [answers, setAnswers] = useState<AnswersState>(() =>
+    Object.fromEntries(MEDICAL_ASSESSMENT_QUESTIONS.map((q) => [q.key, { value: false }]))
+  );
   const [legalName, setLegalName] = useState("");
   const [signatureTyped, setSignatureTyped] = useState("");
   const [signatureConfirmed, setSignatureConfirmed] = useState(false);
