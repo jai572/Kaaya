@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
 import { staffListConsultations } from "../../lib/api";
 
+type ValidityStatus = "current" | "due_for_renewal" | "expired" | "superseded" | "unknown";
+
 type ListRow = {
   id: string;
   client_name: string;
@@ -12,9 +14,18 @@ type ListRow = {
   flag_count: number;
   highest_severity: "HIGH" | "MEDIUM" | "INFORMATION" | null;
   latest_staff_decision: string | null;
+  validity_status: ValidityStatus;
 };
 
-const GRID_COLUMNS = "2fr 2fr 1.2fr 1.4fr 1fr 1.6fr";
+const VALIDITY_LABEL: Record<ValidityStatus, string> = {
+  current: "Current",
+  due_for_renewal: "Due for renewal",
+  expired: "Expired",
+  superseded: "Superseded",
+  unknown: "Unknown",
+};
+
+const GRID_COLUMNS = "1.8fr 1.8fr 1fr 1.2fr 1fr 1.4fr 1.3fr";
 
 export default function StaffConsultationList() {
   const navigate = useNavigate();
@@ -56,6 +67,7 @@ export default function StaffConsultationList() {
             <span>Submitted</span>
             <span>Status</span>
             <span>Flags</span>
+            <span>Validity</span>
             <span>Review</span>
           </div>
           {rows.map((row) => (
@@ -83,6 +95,17 @@ export default function StaffConsultationList() {
                   </span>
                 ) : (
                   "—"
+                )}
+              </span>
+              <span>
+                {row.validity_status === "expired" || row.validity_status === "due_for_renewal" ? (
+                  <span
+                    className={`kaaya-badge kaaya-badge--${row.validity_status === "expired" ? "HIGH" : "MEDIUM"}`}
+                  >
+                    {VALIDITY_LABEL[row.validity_status]}
+                  </span>
+                ) : (
+                  VALIDITY_LABEL[row.validity_status]
                 )}
               </span>
               <span>{row.latest_staff_decision?.replace(/_/g, " ") ?? "Pending review"}</span>

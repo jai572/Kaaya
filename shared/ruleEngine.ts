@@ -79,11 +79,13 @@ export function screenConsultation(
         flags.push({
           rule_id: rule.id,
           rule_key: rule.rule_key,
+          group_key: rule.group_key,
           severity: rule.severity,
           title: rule.title,
           client_answer_summary: answerSummary,
           explanation: `${rule.description_template} Selected treatment(s): ${treatmentNames}. ${FINAL_DECISION_NOTE}`,
           staff_action: rule.staff_action,
+          treatment_ids: relevantTreatments.map((t) => t.id),
         });
         break;
       }
@@ -103,11 +105,13 @@ export function screenConsultation(
         flags.push({
           rule_id: rule.id,
           rule_key: rule.rule_key,
+          group_key: rule.group_key,
           severity: rule.severity,
           title: rule.title,
           client_answer_summary: `${answerLabel(patchTestKey)}: No`,
           explanation: `${rule.description_template} Treatment(s) requiring a patch test: ${treatmentNames}. ${FINAL_DECISION_NOTE}`,
           staff_action: rule.staff_action,
+          treatment_ids: treatmentsNeedingPatchTest.map((t) => t.id),
         });
         break;
       }
@@ -116,14 +120,20 @@ export function screenConsultation(
         if (rule.condition.source !== "signature") break;
         if (signature.consent_without_patch_test !== rule.condition.expect) break;
 
+        // Grouped with patch_test_required under the same treatments (if any
+        // require one) so the staff UI can cluster both reasons together.
+        const treatmentsNeedingPatchTest = selectedTreatments.filter((t) => t.requires_patch_test);
+
         flags.push({
           rule_id: rule.id,
           rule_key: rule.rule_key,
+          group_key: rule.group_key,
           severity: rule.severity,
           title: rule.title,
           client_answer_summary: "Consent to proceed without patch test: Yes",
           explanation: `${rule.description_template} ${FINAL_DECISION_NOTE}`,
           staff_action: rule.staff_action,
+          treatment_ids: treatmentsNeedingPatchTest.map((t) => t.id),
         });
         break;
       }
@@ -139,11 +149,15 @@ export function screenConsultation(
           flags.push({
             rule_id: rule.id,
             rule_key: `${rule.rule_key}:${key}`,
+            group_key: rule.group_key,
             severity: rule.severity,
             title: `${rule.title}: ${answerLabel(key)}`,
             client_answer_summary: `${answerLabel(key)}: Yes`,
             explanation: `${rule.description_template} Reported item: ${answerLabel(key)}. ${FINAL_DECISION_NOTE}`,
             staff_action: rule.staff_action,
+            // No rule currently ties this to a specific treatment — shown as
+            // general in the staff UI rather than guessing an attribution.
+            treatment_ids: [],
           });
         }
         break;

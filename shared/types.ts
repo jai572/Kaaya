@@ -82,16 +82,21 @@ export interface TreatmentRuleRecord {
   description_template: string;
   staff_action: string;
   active: boolean;
+  /** Lets the staff UI cluster related flags (e.g. two patch-test reasons) under one heading without merging their underlying rows. */
+  group_key: string | null;
 }
 
 export interface ScreeningFlag {
   rule_id: string | null;
   rule_key: string;
+  group_key: string | null;
   severity: Severity;
   title: string;
   client_answer_summary: string;
   explanation: string;
   staff_action: string;
+  /** Which selected treatment(s) this flag concerns. Empty = general — not attributed to a specific treatment because no rule actually ties it to one. */
+  treatment_ids: string[];
 }
 
 export interface ScreeningResult {

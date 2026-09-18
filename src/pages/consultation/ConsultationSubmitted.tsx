@@ -7,14 +7,32 @@ export default function ConsultationSubmitted() {
 
   return (
     <div className="kaaya-shell">
-      <div className="kaaya-header">
-        <h1>Kaaya</h1>
-      </div>
-      <div className="kaaya-card">
+      <div className="kaaya-card" style={{ textAlign: "center", paddingTop: 32, paddingBottom: 32 }}>
+        <div
+          aria-hidden
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: "50%",
+            background: "var(--kaaya-accent)",
+            color: "white",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "1.6rem",
+            margin: "0 auto 20px",
+          }}
+        >
+          ✓
+        </div>
         <h2 style={{ marginTop: 0 }}>Thank you</h2>
-        <p>Your consultation has been submitted and will be reviewed by our team before your appointment.</p>
+        <p style={{ maxWidth: 380, margin: "0 auto 8px" }}>Your consultation has been submitted to Kaaya.</p>
+        <p style={{ maxWidth: 380, margin: "0 auto", color: "var(--kaaya-text-muted)" }}>
+          Our team will review your information before your appointment, and may be in touch if anything needs
+          checking. You don't need to submit this again unless we ask you to.
+        </p>
         {accessToken && id && (
-          <p style={{ color: "var(--kaaya-text-muted)", fontSize: "0.9rem" }}>
+          <p style={{ color: "var(--kaaya-text-muted)", fontSize: "0.85rem", marginTop: 24 }}>
             Keep this link to view your submission later:
             <br />
             <code style={{ wordBreak: "break-all" }}>

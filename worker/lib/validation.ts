@@ -56,5 +56,8 @@ export const staffReviewSchema = z.object({
     "further_information_required",
     "do_not_proceed",
   ]),
+  // Enforced server-side, not just as a UI checkbox -- a decision is a
+  // deliberate staff act, not something a stray click should be able to record.
+  confirmed: z.literal(true, { errorMap: () => ({ message: "Staff confirmation is required" }) }),
   notes: z.string().trim().max(4000).optional(),
 });

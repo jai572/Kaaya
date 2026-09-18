@@ -45,6 +45,28 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
   const { data: existingClient } = await admin.from("clients").select("id").eq("email", email).maybeSingle();
 
   let clientId: string;
+  let priorConsultation: { id: string; version: number; valid_until: string | null } | null = null;
+  let priorTreatmentIds = new Set<string>();
+
+  if (existingClient) {
+    const { data: prior } = await admin
+      .from("consultations")
+      .select("id, version, valid_until")
+      .eq("client_id", existingClient.id)
+      .neq("status", "draft")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (prior) {
+      priorConsultation = prior;
+      const { data: priorServices } = await admin
+        .from("consultation_services")
+        .select("treatment_id")
+        .eq("consultation_id", prior.id);
+      priorTreatmentIds = new Set((priorServices ?? []).map((s) => s.treatment_id));
+    }
+  }
+
   if (existingClient) {
     clientId = existingClient.id;
     await admin
@@ -74,13 +96,28 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
 
   const { data: consultation, error: consultationError } = await admin
     .from("consultations")
-    .insert({ client_id: clientId, status: "draft" })
-    .select("id, access_token")
+    .insert({
+      client_id: clientId,
+      status: "draft",
+      version: priorConsultation ? priorConsultation.version + 1 : 1,
+      supersedes_consultation_id: priorConsultation?.id ?? null,
+    })
+    .select("id, access_token, version")
     .single();
   if (consultationError || !consultation) {
     return errorResponse(consultationError?.message ?? "Could not create consultation", 500);
   }
   const consultationId = consultation.id;
+
+  if (priorConsultation) {
+    await recordAuditEvent(admin, {
+      consultation_id: consultationId,
+      actor_id: null,
+      actor_type: "system",
+      event_type: "consultation_version_created",
+      metadata: { supersedes_consultation_id: priorConsultation.id, version: consultation.version },
+    });
+  }
 
   await recordAuditEvent(admin, {
     consultation_id: consultationId,
@@ -119,10 +156,20 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
   });
   if (signatureError) return errorResponse(signatureError.message, 500);
 
-  const submittedAt = new Date().toISOString();
+  const { data: validitySetting } = await admin
+    .from("app_settings")
+    .select("value")
+    .eq("key", "consultation_validity_months")
+    .maybeSingle();
+  const validityMonths = typeof validitySetting?.value === "number" ? validitySetting.value : 6;
+
+  const submittedAt = new Date();
+  const validUntil = new Date(submittedAt);
+  validUntil.setMonth(validUntil.getMonth() + validityMonths);
+
   await admin
     .from("consultations")
-    .update({ status: "submitted", submitted_at: submittedAt })
+    .update({ status: "submitted", submitted_at: submittedAt.toISOString(), valid_until: validUntil.toISOString() })
     .eq("id", consultationId);
 
   await recordAuditEvent(admin, {
@@ -146,17 +193,44 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
     (rules ?? []) as unknown as TreatmentRuleRecord[]
   );
 
+  // New-treatment-not-covered: a treatment requested now that wasn't part of
+  // the client's most recent still-valid consultation. Being "less than N
+  // months old" doesn't mean every treatment in it was actually screened --
+  // per-treatment coverage is checked independently of time-validity.
+  const priorStillValid = priorConsultation?.valid_until && new Date(priorConsultation.valid_until) > submittedAt;
+  if (priorStillValid) {
+    const newlyRequested = treatments.filter((t) => !priorTreatmentIds.has(t.id));
+    if (newlyRequested.length > 0) {
+      result.flags.push({
+        rule_id: null,
+        rule_key: "new_treatment_not_covered",
+        group_key: null,
+        severity: "INFORMATION",
+        title: "New treatment not previously covered",
+        client_answer_summary: `Requested: ${newlyRequested.map((t) => t.name).join(", ")}`,
+        explanation:
+          "This treatment was not included in the client's most recent consultation and has not been previously screened, even though that consultation is still within its validity period. Final treatment suitability remains a staff decision.",
+        staff_action: "Confirm this treatment has been reviewed before proceeding.",
+        treatment_ids: newlyRequested.map((t) => t.id),
+      });
+      result.summary.total += 1;
+      result.summary.information += 1;
+    }
+  }
+
   if (result.flags.length > 0) {
     const { error: flagsError } = await admin.from("consultation_flags").insert(
       result.flags.map((f) => ({
         consultation_id: consultationId,
         rule_id: f.rule_id,
         rule_key: f.rule_key,
+        group_key: f.group_key,
         severity: f.severity,
         title: f.title,
         client_answer_summary: f.client_answer_summary,
         explanation: f.explanation,
         staff_action: f.staff_action,
+        treatment_ids: f.treatment_ids,
       }))
     );
     if (flagsError) return errorResponse(flagsError.message, 500);

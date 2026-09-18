@@ -55,11 +55,11 @@ export async function staffGetConsultation(id: string) {
   return request(`/api/staff/consultations/${id}`, { headers });
 }
 
-export async function staffRecordReview(id: string, decision: string, notes?: string) {
+export async function staffRecordReview(id: string, decision: string, confirmed: true, notes?: string) {
   const headers = await staffAuthHeader();
   return request(`/api/staff/consultations/${id}/review`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ decision, notes }),
+    body: JSON.stringify({ decision, confirmed, notes }),
   });
 }

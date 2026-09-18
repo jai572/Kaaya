@@ -13,6 +13,29 @@ function highestSeverity(severities: Severity[]): Severity | null {
   return severities.reduce((a, b) => (SEVERITY_RANK[b] > SEVERITY_RANK[a] ? b : a));
 }
 
+type ValidityStatus = "current" | "due_for_renewal" | "expired" | "superseded" | "unknown";
+
+const RENEWAL_REMINDER_DAYS_DEFAULT = 30;
+
+/**
+ * Derived, not stored — a status column would silently go stale the moment
+ * time passes without an update job. Computing it at read time means it's
+ * never wrong.
+ */
+function validityStatus(
+  validUntil: string | null,
+  isSuperseded: boolean,
+  renewalReminderDays: number
+): ValidityStatus {
+  if (isSuperseded) return "superseded";
+  if (!validUntil) return "unknown";
+  const now = Date.now();
+  const until = new Date(validUntil).getTime();
+  if (now > until) return "expired";
+  if (now > until - renewalReminderDays * 24 * 60 * 60 * 1000) return "due_for_renewal";
+  return "current";
+}
+
 const DECISION_TO_STATUS: Record<string, string> = {
   suitable_to_proceed: "reviewed",
   proceed_with_conditions: "reviewed",
@@ -35,32 +58,42 @@ export async function listStaffConsultations(request: Request, env: Env): Promis
   }
 
   const admin = adminClient(env);
-  const { data, error } = await admin
-    .from("consultations")
-    .select(
-      `id, status, submitted_at, version,
-       clients(first_name, last_name),
-       consultation_services(treatments(name)),
-       consultation_flags(severity),
-       staff_reviews(decision, decided_at)`
-    )
-    .neq("status", "draft")
-    .order("submitted_at", { ascending: false });
+  const [{ data, error }, { data: renewalSetting }] = await Promise.all([
+    admin
+      .from("consultations")
+      .select(
+        `id, status, submitted_at, version, valid_until, supersedes_consultation_id,
+         clients(first_name, last_name),
+         consultation_services(treatments(name)),
+         consultation_flags(severity),
+         staff_reviews(decision, decided_at)`
+      )
+      .neq("status", "draft")
+      .order("submitted_at", { ascending: false }),
+    admin.from("app_settings").select("value").eq("key", "renewal_reminder_days_before_expiry").maybeSingle(),
+  ]);
 
   if (error) return errorResponse(error.message, 500);
+  const renewalReminderDays =
+    typeof renewalSetting?.value === "number" ? renewalSetting.value : RENEWAL_REMINDER_DAYS_DEFAULT;
 
   type Row = {
     id: string;
     status: string;
     submitted_at: string | null;
     version: number;
+    valid_until: string | null;
+    supersedes_consultation_id: string | null;
     clients: { first_name: string; last_name: string } | null;
     consultation_services: { treatments: { name: string } | null }[];
     consultation_flags: { severity: Severity }[];
     staff_reviews: { decision: string; decided_at: string }[];
   };
 
-  const rows = ((data ?? []) as unknown as Row[]).map((c) => {
+  const allRows = (data ?? []) as unknown as Row[];
+  const supersededIds = new Set(allRows.map((c) => c.supersedes_consultation_id).filter((id): id is string => !!id));
+
+  const rows = allRows.map((c) => {
     const latestReview = [...c.staff_reviews].sort((a, b) => b.decided_at.localeCompare(a.decided_at))[0];
     return {
       id: c.id,
@@ -71,6 +104,8 @@ export async function listStaffConsultations(request: Request, env: Env): Promis
       flag_count: c.consultation_flags.length,
       highest_severity: highestSeverity(c.consultation_flags.map((f) => f.severity)),
       latest_staff_decision: latestReview?.decision ?? null,
+      valid_until: c.valid_until,
+      validity_status: validityStatus(c.valid_until, supersededIds.has(c.id), renewalReminderDays),
     };
   });
 
@@ -90,7 +125,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
   const { data: consultation, error } = await admin
     .from("consultations")
     .select(
-      `id, status, version, submitted_at, screened_at, reviewed_at,
+      `id, status, version, submitted_at, screened_at, reviewed_at, valid_until, supersedes_consultation_id,
        clients(id, first_name, last_name, email, phone, address)`
     )
     .eq("id", consultationId)
@@ -99,30 +134,43 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
   if (error) return errorResponse(error.message, 500);
   if (!consultation) return errorResponse("Not found", 404);
 
-  const [{ data: answers }, { data: services }, { data: flags }, { data: signature }, { data: reviews }] =
-    await Promise.all([
-      admin
-        .from("consultation_answers")
-        .select("section, question_key, question_label, answer_value, additional_info")
-        .eq("consultation_id", consultationId)
-        .order("section"),
-      admin.from("consultation_services").select("treatments(id, name)").eq("consultation_id", consultationId),
-      admin
-        .from("consultation_flags")
-        .select("id, severity, title, client_answer_summary, explanation, staff_action, created_at")
-        .eq("consultation_id", consultationId)
-        .order("severity"),
-      admin
-        .from("signatures")
-        .select("legal_name, signature_value, method, is_provisional, consent_without_patch_test, signed_at")
-        .eq("consultation_id", consultationId)
-        .maybeSingle(),
-      admin
-        .from("staff_reviews")
-        .select("id, staff_id, decision, notes, decided_at, consultation_version, staff_profiles(full_name)")
-        .eq("consultation_id", consultationId)
-        .order("decided_at", { ascending: false }),
-    ]);
+  const [
+    { data: answers },
+    { data: services },
+    { data: flags },
+    { data: signature },
+    { data: reviews },
+    { data: supersededBy },
+    { data: renewalSetting },
+  ] = await Promise.all([
+    admin
+      .from("consultation_answers")
+      .select("section, question_key, question_label, answer_value, additional_info")
+      .eq("consultation_id", consultationId)
+      .order("section"),
+    admin.from("consultation_services").select("treatments(id, name)").eq("consultation_id", consultationId),
+    admin
+      .from("consultation_flags")
+      .select(
+        "id, severity, title, client_answer_summary, explanation, staff_action, created_at, treatment_ids, group_key"
+      )
+      .eq("consultation_id", consultationId)
+      .order("severity"),
+    admin
+      .from("signatures")
+      .select(
+        "legal_name, signature_value, method, is_provisional, consent_without_patch_test, signed_at, declaration_version"
+      )
+      .eq("consultation_id", consultationId)
+      .maybeSingle(),
+    admin
+      .from("staff_reviews")
+      .select("id, staff_id, decision, notes, decided_at, consultation_version, staff_profiles(full_name)")
+      .eq("consultation_id", consultationId)
+      .order("decided_at", { ascending: false }),
+    admin.from("consultations").select("id").eq("supersedes_consultation_id", consultationId).maybeSingle(),
+    admin.from("app_settings").select("value").eq("key", "renewal_reminder_days_before_expiry").maybeSingle(),
+  ]);
 
   await recordAuditEvent(admin, {
     consultation_id: consultationId,
@@ -131,8 +179,13 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
     event_type: "consultation_opened_by_staff",
   });
 
+  const renewalReminderDays =
+    typeof renewalSetting?.value === "number" ? renewalSetting.value : RENEWAL_REMINDER_DAYS_DEFAULT;
+
   return json({
     ...consultation,
+    validity_status: validityStatus(consultation.valid_until, !!supersededBy, renewalReminderDays),
+    superseded_by_consultation_id: supersededBy?.id ?? null,
     treatments: ((services ?? []) as unknown as { treatments: { id: string; name: string } | null }[]).map(
       (s) => s.treatments
     ),

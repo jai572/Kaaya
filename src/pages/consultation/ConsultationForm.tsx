@@ -24,6 +24,8 @@ export default function ConsultationForm() {
   const step: Step = STEPS[stepIndex];
 
   const [treatments, setTreatments] = useState<Treatment[]>([]);
+  const [treatmentsLoading, setTreatmentsLoading] = useState(true);
+  const [treatmentsError, setTreatmentsError] = useState<string | null>(null);
   const [selectedTreatmentIds, setSelectedTreatmentIds] = useState<string[]>([]);
   // Medical checkboxes default to false (unchecked = "No"/does not apply),
   // same as reading a paper form — a box that was never touched still means
@@ -38,12 +40,23 @@ export default function ConsultationForm() {
   const [consentWithoutPatchTest, setConsentWithoutPatchTest] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [touchedProfileFields, setTouchedProfileFields] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     getTreatments()
       .then((res) => setTreatments(res.treatments))
-      .catch(() => setError("Could not load treatment list. Please refresh."));
+      .catch(() => setTreatmentsError("Could not load the treatment list."))
+      .finally(() => setTreatmentsLoading(false));
   }, []);
+
+  function retryLoadTreatments() {
+    setTreatmentsLoading(true);
+    setTreatmentsError(null);
+    getTreatments()
+      .then((res) => setTreatments(res.treatments))
+      .catch(() => setTreatmentsError("Could not load the treatment list."))
+      .finally(() => setTreatmentsLoading(false));
+  }
 
   function setTextAnswer(key: string, value: string) {
     setAnswers((prev) => ({ ...prev, [key]: { value } }));
@@ -61,9 +74,20 @@ export default function ConsultationForm() {
     setSelectedTreatmentIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
   }
 
-  const profileComplete = PERSONAL_PROFILE_QUESTIONS.filter((q) => q.required).every(
-    (q) => typeof answers[q.key]?.value === "string" && (answers[q.key]?.value as string).trim().length > 0
-  );
+  const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const profileFieldErrors: Record<string, string> = {};
+  for (const q of PERSONAL_PROFILE_QUESTIONS) {
+    const value = (answers[q.key]?.value as string) ?? "";
+    if (q.required && value.trim().length === 0) {
+      profileFieldErrors[q.key] = "This field is required.";
+    } else if (q.key === "email" && value.trim().length > 0 && !EMAIL_PATTERN.test(value.trim())) {
+      profileFieldErrors[q.key] = "Enter a valid email address.";
+    } else if (q.key === "phone" && value.trim().length > 0 && value.trim().length < 6) {
+      profileFieldErrors[q.key] = "Enter a valid phone number.";
+    }
+  }
+  const profileComplete = Object.keys(profileFieldErrors).length === 0;
 
   const medicalComplete = MEDICAL_ASSESSMENT_QUESTIONS.every((q) => typeof answers[q.key]?.value === "boolean");
 
@@ -157,7 +181,10 @@ export default function ConsultationForm() {
         <p>Client consultation</p>
       </div>
 
-      <div className="kaaya-progress">
+      <p style={{ textAlign: "center", color: "var(--kaaya-text-muted)", fontSize: "0.85rem", marginTop: 0 }}>
+        Step {stepIndex + 1} of {STEPS.length}
+      </p>
+      <div className="kaaya-progress" role="progressbar" aria-valuenow={stepIndex + 1} aria-valuemin={1} aria-valuemax={STEPS.length}>
         {STEPS.map((s, i) => (
           <div
             key={s}
@@ -180,17 +207,32 @@ export default function ConsultationForm() {
 
       {step === "profile" && (
         <div className="kaaya-card">
-          {PERSONAL_PROFILE_QUESTIONS.map((q) => (
-            <div className="kaaya-field" key={q.key}>
-              <label htmlFor={q.key}>{q.label}{q.required ? " *" : ""}</label>
-              <input
-                id={q.key}
-                type={q.kind === "email" ? "email" : q.kind === "tel" ? "tel" : "text"}
-                value={(answers[q.key]?.value as string) ?? ""}
-                onChange={(e) => setTextAnswer(q.key, e.target.value)}
-              />
-            </div>
-          ))}
+          <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0, fontSize: "0.85rem" }}>* Required</p>
+          {PERSONAL_PROFILE_QUESTIONS.map((q) => {
+            const fieldError = touchedProfileFields.has(q.key) ? profileFieldErrors[q.key] : undefined;
+            return (
+              <div className="kaaya-field" key={q.key}>
+                <label htmlFor={q.key}>
+                  {q.label}
+                  {q.required ? " *" : ""}
+                </label>
+                <input
+                  id={q.key}
+                  type={q.kind === "email" ? "email" : q.kind === "tel" ? "tel" : "text"}
+                  value={(answers[q.key]?.value as string) ?? ""}
+                  onChange={(e) => setTextAnswer(q.key, e.target.value)}
+                  onBlur={() => setTouchedProfileFields((prev) => new Set(prev).add(q.key))}
+                  aria-invalid={!!fieldError}
+                  aria-describedby={fieldError ? `${q.key}-error` : undefined}
+                />
+                {fieldError && (
+                  <p id={`${q.key}-error`} className="kaaya-error" role="alert">
+                    {fieldError}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -226,17 +268,28 @@ export default function ConsultationForm() {
       {step === "treatment" && (
         <div className="kaaya-card">
           <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>Select all treatments you'd like to discuss.</p>
-          {treatments.map((t) => (
-            <div
-              key={t.id}
-              className="kaaya-treatment-option"
-              data-selected={selectedTreatmentIds.includes(t.id)}
-              onClick={() => toggleTreatment(t.id)}
-            >
-              <input type="checkbox" checked={selectedTreatmentIds.includes(t.id)} readOnly />
-              <span>{t.name}</span>
+          {treatmentsLoading && <p>Loading treatments…</p>}
+          {treatmentsError && (
+            <div>
+              <p className="kaaya-error">{treatmentsError}</p>
+              <button type="button" className="kaaya-btn kaaya-btn--secondary" onClick={retryLoadTreatments}>
+                Try again
+              </button>
             </div>
-          ))}
+          )}
+          {!treatmentsLoading &&
+            !treatmentsError &&
+            treatments.map((t) => (
+              <div
+                key={t.id}
+                className="kaaya-treatment-option"
+                data-selected={selectedTreatmentIds.includes(t.id)}
+                onClick={() => toggleTreatment(t.id)}
+              >
+                <input type="checkbox" checked={selectedTreatmentIds.includes(t.id)} readOnly />
+                <span>{t.name}</span>
+              </div>
+            ))}
         </div>
       )}
 
@@ -310,7 +363,11 @@ export default function ConsultationForm() {
         </div>
       )}
 
-      {error && <p className="kaaya-error">{error}</p>}
+      {error && (
+        <p className="kaaya-error" role="alert" aria-live="assertive">
+          {error}
+        </p>
+      )}
 
       <div className="kaaya-btn-row">
         {stepIndex > 0 && (
