@@ -9,13 +9,6 @@ export const answerInputSchema = z.object({
   additional_info: z.string().max(2000).nullable().optional(),
 });
 
-export const signatureInputSchema = z.object({
-  method: z.literal("typed"),
-  legal_name: z.string().trim().min(2, "Legal name is required"),
-  signature_value: z.string().trim().min(2),
-  consent_without_patch_test: z.boolean(),
-});
-
 export const consultationSubmissionSchema = z.object({
   client: z.object({
     first_name: z.string().trim().min(1),
@@ -26,7 +19,28 @@ export const consultationSubmissionSchema = z.object({
   }),
   answers: z.array(answerInputSchema),
   treatment_ids: z.array(z.string().uuid()).min(1, "Select at least one treatment"),
-  signature: signatureInputSchema,
+});
+
+// A blank canvas can still export as a small valid PNG data URL, so this
+// floor is a heuristic, not a cryptographic guarantee -- the real signal is
+// the client's own hasDrawn tracking, this just catches an empty/near-empty
+// submission that bypassed it.
+const MIN_SIGNATURE_DATA_URL_LENGTH = 300;
+
+export const drawnSignatureInputSchema = z.object({
+  method: z.literal("drawn"),
+  legal_name: z.string().trim().min(2, "Legal name is required"),
+  signature_value: z
+    .string()
+    .startsWith("data:image/png;base64,", "Signature must be a PNG data URL")
+    .refine((v) => v.length >= MIN_SIGNATURE_DATA_URL_LENGTH, "Signature appears to be empty"),
+});
+
+export const finalizeConsultationSchema = z.object({
+  decision: z.enum(["continue", "decline"]),
+  acknowledged_flag_ids: z.array(z.string().uuid()),
+  signature: drawnSignatureInputSchema,
+  device_info: z.record(z.string(), z.unknown()).optional(),
 });
 
 const knownQuestionKeys = new Set(ALL_QUESTIONS.map((q) => q.key));

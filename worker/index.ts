@@ -1,7 +1,7 @@
 import type { Env } from "./env";
 import { errorResponse } from "./lib/http";
 import { listTreatments } from "./routes/treatments";
-import { submitConsultation, getClientConsultation } from "./routes/consultations";
+import { submitConsultation, getClientConsultation, finalizeConsultation } from "./routes/consultations";
 import { listStaffConsultations, getStaffConsultation, recordStaffReview } from "./routes/staff";
 
 async function handleApi(request: Request, env: Env, path: string): Promise<Response> {
@@ -18,6 +18,11 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
   const consultationMatch = path.match(/^\/api\/consultations\/([^/]+)$/);
   if (consultationMatch && method === "GET") {
     return getClientConsultation(request, env, consultationMatch[1]);
+  }
+
+  const finalizeMatch = path.match(/^\/api\/consultations\/([^/]+)\/finalize$/);
+  if (finalizeMatch && method === "POST") {
+    return finalizeConsultation(request, env, finalizeMatch[1]);
   }
 
   if (path === "/api/staff/consultations" && method === "GET") {

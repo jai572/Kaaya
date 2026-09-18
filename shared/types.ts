@@ -23,13 +23,9 @@ export interface AnswerInput {
   additional_info?: string | null;
 }
 
-export interface SignatureInput {
-  method: "typed";
-  legal_name: string;
-  signature_value: string;
-  consent_without_patch_test: boolean;
-}
-
+// Phase 1: client info + answers + treatments only. No signature yet -- the
+// client sees their flags and decides before signing, so screening (and this
+// submission) necessarily happens before any signature exists.
 export interface ConsultationSubmission {
   client: {
     first_name: string;
@@ -40,7 +36,24 @@ export interface ConsultationSubmission {
   };
   answers: AnswerInput[];
   treatment_ids: string[];
-  signature: SignatureInput;
+}
+
+export type ClientDecision = "continue" | "decline";
+
+export interface DrawnSignatureInput {
+  method: "drawn";
+  legal_name: string;
+  /** PNG data URL from the signature canvas. */
+  signature_value: string;
+}
+
+// Phase 2: shown the flags from phase 1, the client acknowledges them,
+// decides whether to continue, and signs. This locks the consultation.
+export interface FinalizeConsultationInput {
+  decision: ClientDecision;
+  acknowledged_flag_ids: string[];
+  signature: DrawnSignatureInput;
+  device_info?: Record<string, unknown>;
 }
 
 export interface TreatmentRecord {
@@ -84,12 +97,15 @@ export interface TreatmentRuleRecord {
   active: boolean;
   /** Lets the staff UI cluster related flags (e.g. two patch-test reasons) under one heading without merging their underlying rows. */
   group_key: string | null;
+  /** Client-facing grouping label (e.g. "Patch test", "Eye health") -- coarser than rule_type, which is an internal key. */
+  category: string | null;
 }
 
 export interface ScreeningFlag {
   rule_id: string | null;
   rule_key: string;
   group_key: string | null;
+  category: string | null;
   severity: Severity;
   title: string;
   client_answer_summary: string;

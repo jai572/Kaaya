@@ -1,7 +1,7 @@
 import type { Env } from "../env";
 import { adminClient } from "../lib/supabase";
 import { json, errorResponse } from "../lib/http";
-import { consultationSubmissionSchema, validateAnswerCompleteness } from "../lib/validation";
+import { consultationSubmissionSchema, validateAnswerCompleteness, finalizeConsultationSchema } from "../lib/validation";
 import { recordAuditEvent } from "../lib/audit";
 import { screenConsultation } from "../../shared/ruleEngine";
 import { ALL_QUESTIONS } from "../../shared/questions";
@@ -9,6 +9,22 @@ import type { TreatmentRuleRecord } from "../../shared/types";
 
 const QUESTION_META = new Map(ALL_QUESTIONS.map((q) => [q.key, { section: q.section, label: q.label }]));
 
+type FlagRow = {
+  id: string;
+  rule_key: string;
+  group_key: string | null;
+  category: string | null;
+  severity: "HIGH" | "MEDIUM" | "INFORMATION";
+  title: string;
+  client_answer_summary: string;
+  explanation: string;
+  staff_action: string;
+  treatment_ids: string[];
+};
+
+// Phase 1: client info + answers + treatments -> screening runs -> flags are
+// returned to the client so they can be shown BEFORE any signature exists.
+// This does not finalize the consultation; see finalizeConsultation below.
 export async function submitConsultation(request: Request, env: Env): Promise<Response> {
   let body: unknown;
   try {
@@ -146,16 +162,6 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
   );
   if (servicesError) return errorResponse(servicesError.message, 500);
 
-  const { error: signatureError } = await admin.from("signatures").insert({
-    consultation_id: consultationId,
-    method: "typed",
-    legal_name: submission.signature.legal_name,
-    signature_value: submission.signature.signature_value,
-    is_provisional: true,
-    consent_without_patch_test: submission.signature.consent_without_patch_test,
-  });
-  if (signatureError) return errorResponse(signatureError.message, 500);
-
   const { data: validitySetting } = await admin
     .from("app_settings")
     .select("value")
@@ -186,12 +192,7 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
     .eq("active", true);
   if (rulesError) return errorResponse(rulesError.message, 500);
 
-  const result = screenConsultation(
-    submission.answers,
-    treatments,
-    submission.signature,
-    (rules ?? []) as unknown as TreatmentRuleRecord[]
-  );
+  const result = screenConsultation(submission.answers, treatments, (rules ?? []) as unknown as TreatmentRuleRecord[]);
 
   // New-treatment-not-covered: a treatment requested now that wasn't part of
   // the client's most recent still-valid consultation. Being "less than N
@@ -205,6 +206,7 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
         rule_id: null,
         rule_key: "new_treatment_not_covered",
         group_key: null,
+        category: "Treatment coverage",
         severity: "INFORMATION",
         title: "New treatment not previously covered",
         client_answer_summary: `Requested: ${newlyRequested.map((t) => t.name).join(", ")}`,
@@ -218,22 +220,28 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
     }
   }
 
+  let insertedFlags: FlagRow[] = [];
   if (result.flags.length > 0) {
-    const { error: flagsError } = await admin.from("consultation_flags").insert(
-      result.flags.map((f) => ({
-        consultation_id: consultationId,
-        rule_id: f.rule_id,
-        rule_key: f.rule_key,
-        group_key: f.group_key,
-        severity: f.severity,
-        title: f.title,
-        client_answer_summary: f.client_answer_summary,
-        explanation: f.explanation,
-        staff_action: f.staff_action,
-        treatment_ids: f.treatment_ids,
-      }))
-    );
+    const { data: flagsData, error: flagsError } = await admin
+      .from("consultation_flags")
+      .insert(
+        result.flags.map((f) => ({
+          consultation_id: consultationId,
+          rule_id: f.rule_id,
+          rule_key: f.rule_key,
+          group_key: f.group_key,
+          category: f.category,
+          severity: f.severity,
+          title: f.title,
+          client_answer_summary: f.client_answer_summary,
+          explanation: f.explanation,
+          staff_action: f.staff_action,
+          treatment_ids: f.treatment_ids,
+        }))
+      )
+      .select("id, rule_key, group_key, category, severity, title, client_answer_summary, explanation, staff_action, treatment_ids");
     if (flagsError) return errorResponse(flagsError.message, 500);
+    insertedFlags = (flagsData ?? []) as FlagRow[];
 
     for (const flag of result.flags) {
       await recordAuditEvent(admin, {
@@ -249,7 +257,7 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
   const screenedAt = new Date().toISOString();
   await admin
     .from("consultations")
-    .update({ status: "pending_review", screened_at: screenedAt })
+    .update({ status: "screening_complete", screened_at: screenedAt })
     .eq("id", consultationId);
 
   await recordAuditEvent(admin, {
@@ -260,14 +268,152 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
     metadata: { summary: result.summary },
   });
 
+  // The flags become visible to the client in this very response -- log that
+  // they were shown, distinct from them being generated.
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "system",
+    event_type: "flag_displayed_to_client",
+    metadata: { flag_ids: insertedFlags.map((f) => f.id) },
+  });
+
   return json(
     {
       consultation_id: consultationId,
       access_token: consultation.access_token,
-      status: "pending_review",
+      status: "screening_complete",
+      flags: insertedFlags,
+      treatments: treatments.map((t) => ({ id: t.id, name: t.name })),
     },
     201
   );
+}
+
+// Phase 2: the client has seen the flags from phase 1, acknowledges them,
+// decides whether to continue, and signs. This locks the consultation --
+// the acknowledgement does not change or remove any staff-facing requirement
+// (e.g. a missing patch test is still missing regardless of the decision).
+export async function finalizeConsultation(request: Request, env: Env, consultationId: string): Promise<Response> {
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token");
+  if (!token) return errorResponse("Missing token", 401);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("Invalid JSON body");
+  }
+  const parsed = finalizeConsultationSchema.safeParse(body);
+  if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+  const input = parsed.data;
+
+  const admin = adminClient(env);
+  const { data: consultation, error } = await admin
+    .from("consultations")
+    .select("id, access_token, status, locked_at")
+    .eq("id", consultationId)
+    .maybeSingle();
+
+  if (error || !consultation || consultation.access_token !== token) {
+    return errorResponse("Not found", 404);
+  }
+  if (consultation.locked_at) {
+    return errorResponse("This consultation has already been signed and locked", 409);
+  }
+  if (consultation.status !== "screening_complete") {
+    return errorResponse("This consultation is not ready to be finalized", 409);
+  }
+
+  const { data: flags, error: flagsError } = await admin
+    .from("consultation_flags")
+    .select("id, title, severity, category, client_answer_summary, explanation, staff_action, treatment_ids")
+    .eq("consultation_id", consultationId);
+  if (flagsError) return errorResponse(flagsError.message, 500);
+
+  const allFlagIds = new Set((flags ?? []).map((f) => f.id));
+  const acknowledgedSet = new Set(input.acknowledged_flag_ids);
+  const missingAcknowledgement = [...allFlagIds].filter((id) => !acknowledgedSet.has(id));
+  if (missingAcknowledgement.length > 0) {
+    return errorResponse("All identified attention items must be acknowledged before continuing");
+  }
+  const unknownFlagIds = input.acknowledged_flag_ids.filter((id) => !allFlagIds.has(id));
+  if (unknownFlagIds.length > 0) {
+    return errorResponse("Acknowledgement references a flag that does not belong to this consultation");
+  }
+
+  const explanationSnapshot = flags ?? [];
+
+  const { error: ackError } = await admin.from("consultation_acknowledgements").insert({
+    consultation_id: consultationId,
+    flag_ids: input.acknowledged_flag_ids,
+    explanation_snapshot: explanationSnapshot,
+    client_decision: input.decision,
+    device_info: input.device_info ?? null,
+  });
+  if (ackError) return errorResponse(ackError.message, 500);
+
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "client_acknowledgement_accepted",
+    metadata: { flag_ids: input.acknowledged_flag_ids },
+  });
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "client_decision_recorded",
+    metadata: { decision: input.decision },
+  });
+
+  // Derived for backward compatibility with the pre-existing column, which
+  // predates the acknowledgement workflow: true if the client chose to
+  // continue despite an unmet patch-test requirement being among the flags
+  // they acknowledged.
+  const hasUnmetPatchTest = (flags ?? []).some((f) => f.title === "Patch test not recorded");
+  const consentWithoutPatchTest = input.decision === "continue" && hasUnmetPatchTest;
+
+  const { error: signatureError } = await admin.from("signatures").insert({
+    consultation_id: consultationId,
+    method: "drawn",
+    legal_name: input.signature.legal_name,
+    signature_value: input.signature.signature_value,
+    is_provisional: true,
+    consent_without_patch_test: consentWithoutPatchTest,
+    device_info: input.device_info ?? null,
+  });
+  if (signatureError) return errorResponse(signatureError.message, 500);
+
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "electronic_signature_captured",
+    metadata: { method: "drawn" },
+  });
+
+  const lockedAt = new Date().toISOString();
+  const newStatus = input.decision === "decline" ? "held" : "pending_review";
+  await admin.from("consultations").update({ status: newStatus, locked_at: lockedAt }).eq("id", consultationId);
+
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "system",
+    event_type: "consultation_locked",
+    metadata: { decision: input.decision },
+  });
+  await recordAuditEvent(admin, {
+    consultation_id: consultationId,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "consultation_completed",
+  });
+
+  return json({ consultation_id: consultationId, status: newStatus, locked: true });
 }
 
 export async function getClientConsultation(request: Request, env: Env, consultationId: string): Promise<Response> {
@@ -278,7 +424,7 @@ export async function getClientConsultation(request: Request, env: Env, consulta
   const admin = adminClient(env);
   const { data: consultation, error } = await admin
     .from("consultations")
-    .select("id, status, access_token, submitted_at, created_at")
+    .select("id, status, access_token, submitted_at, locked_at, created_at")
     .eq("id", consultationId)
     .maybeSingle();
 
@@ -287,30 +433,43 @@ export async function getClientConsultation(request: Request, env: Env, consulta
     return errorResponse("Not found", 404);
   }
 
-  const [{ data: answers }, { data: services }, { data: signature }] = await Promise.all([
-    admin
-      .from("consultation_answers")
-      .select("question_key, question_label, answer_value, additional_info")
-      .eq("consultation_id", consultationId),
-    admin
-      .from("consultation_services")
-      .select("treatments(id, name)")
-      .eq("consultation_id", consultationId),
-    admin
-      .from("signatures")
-      .select("legal_name, signed_at, is_provisional")
-      .eq("consultation_id", consultationId)
-      .maybeSingle(),
-  ]);
+  const [{ data: answers }, { data: services }, { data: signature }, { data: flags }, { data: acknowledgement }] =
+    await Promise.all([
+      admin
+        .from("consultation_answers")
+        .select("question_key, question_label, answer_value, additional_info")
+        .eq("consultation_id", consultationId),
+      admin
+        .from("consultation_services")
+        .select("treatments(id, name)")
+        .eq("consultation_id", consultationId),
+      admin
+        .from("signatures")
+        .select("legal_name, signed_at, is_provisional")
+        .eq("consultation_id", consultationId)
+        .maybeSingle(),
+      admin
+        .from("consultation_flags")
+        .select("id, rule_key, group_key, category, severity, title, client_answer_summary, explanation, staff_action, treatment_ids")
+        .eq("consultation_id", consultationId),
+      admin
+        .from("consultation_acknowledgements")
+        .select("client_decision, acknowledged_at")
+        .eq("consultation_id", consultationId)
+        .maybeSingle(),
+    ]);
 
   return json({
     id: consultation.id,
     status: consultation.status,
+    locked: !!consultation.locked_at,
     submitted_at: consultation.submitted_at,
     answers,
     treatments: ((services ?? []) as unknown as { treatments: { id: string; name: string } | null }[]).map(
       (s) => s.treatments
     ),
     signature,
+    flags: flags ?? [],
+    acknowledgement,
   });
 }

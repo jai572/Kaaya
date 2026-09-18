@@ -4,7 +4,6 @@ import type {
   RuleCondition,
   ScreeningFlag,
   ScreeningResult,
-  SignatureInput,
   TreatmentRecord,
   TreatmentRuleRecord,
 } from "./types";
@@ -16,6 +15,12 @@ import type {
 // states that final treatment suitability remains a staff decision. Rules are
 // data (treatment_rules table), not hardcoded branches, so new rules or
 // treatments can be added without changing this file.
+//
+// Runs BEFORE the client signs: the client acknowledgement workflow shows
+// these flags to the client first, so there is no signature to evaluate
+// against yet (see consent_without_patch_test below, which is deactivated
+// for exactly this reason -- its old signature-sourced condition can no
+// longer run at this point in the flow).
 
 const LABELS = new Map(ALL_QUESTIONS.map((q) => [q.key, q.label]));
 
@@ -51,7 +56,6 @@ const FINAL_DECISION_NOTE = "Final treatment suitability remains a staff decisio
 export function screenConsultation(
   answers: AnswerInput[],
   selectedTreatments: TreatmentRecord[],
-  signature: SignatureInput,
   rules: TreatmentRuleRecord[]
 ): ScreeningResult {
   const answerMap = answersByKey(answers);
@@ -80,6 +84,7 @@ export function screenConsultation(
           rule_id: rule.id,
           rule_key: rule.rule_key,
           group_key: rule.group_key,
+          category: rule.category,
           severity: rule.severity,
           title: rule.title,
           client_answer_summary: answerSummary,
@@ -106,6 +111,7 @@ export function screenConsultation(
           rule_id: rule.id,
           rule_key: rule.rule_key,
           group_key: rule.group_key,
+          category: rule.category,
           severity: rule.severity,
           title: rule.title,
           client_answer_summary: `${answerLabel(patchTestKey)}: No`,
@@ -116,27 +122,14 @@ export function screenConsultation(
         break;
       }
 
-      case "consent_without_patch_test": {
-        if (rule.condition.source !== "signature") break;
-        if (signature.consent_without_patch_test !== rule.condition.expect) break;
-
-        // Grouped with patch_test_required under the same treatments (if any
-        // require one) so the staff UI can cluster both reasons together.
-        const treatmentsNeedingPatchTest = selectedTreatments.filter((t) => t.requires_patch_test);
-
-        flags.push({
-          rule_id: rule.id,
-          rule_key: rule.rule_key,
-          group_key: rule.group_key,
-          severity: rule.severity,
-          title: rule.title,
-          client_answer_summary: "Consent to proceed without patch test: Yes",
-          explanation: `${rule.description_template} ${FINAL_DECISION_NOTE}`,
-          staff_action: rule.staff_action,
-          treatment_ids: treatmentsNeedingPatchTest.map((t) => t.id),
-        });
+      // Deactivated (treatment_rules.active = false): superseded by the
+      // generic continue/decline decision every flag now goes through via
+      // the client acknowledgement workflow, recorded in
+      // consultation_acknowledgements rather than a patch-test-specific
+      // consent checkbox. Kept only so historical flags stay linkable via
+      // rule_id. Since no active rule reaches this branch, it's a no-op.
+      case "consent_without_patch_test":
         break;
-      }
 
       case "general_medical_information": {
         if (rule.condition.source !== "answers") break;
@@ -150,6 +143,7 @@ export function screenConsultation(
             rule_id: rule.id,
             rule_key: `${rule.rule_key}:${key}`,
             group_key: rule.group_key,
+            category: rule.category,
             severity: rule.severity,
             title: `${rule.title}: ${answerLabel(key)}`,
             client_answer_summary: `${answerLabel(key)}: Yes`,

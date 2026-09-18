@@ -5,8 +5,9 @@ import {
   MEDICAL_ASSESSMENT_QUESTIONS,
   PATCH_TEST_QUESTIONS,
 } from "@shared/questions";
-import type { AnswerInput } from "@shared/types";
-import { getTreatments, submitConsultation } from "../../lib/api";
+import type { AnswerInput, ClientDecision } from "@shared/types";
+import { getTreatments, submitConsultation, finalizeConsultation, type ClientFlag } from "../../lib/api";
+import SignaturePad from "../../components/SignaturePad";
 
 type Treatment = {
   id: string;
@@ -15,8 +16,28 @@ type Treatment = {
 
 type AnswersState = Record<string, { value: boolean | string; additional_info?: string }>;
 
-const STEPS = ["intro", "profile", "medical", "treatment", "patch_test", "declaration", "signature"] as const;
+const STEPS = [
+  "intro",
+  "profile",
+  "medical",
+  "treatment",
+  "patch_test",
+  "declaration",
+  "review_flags",
+  "signature",
+] as const;
 type Step = (typeof STEPS)[number];
+
+const SEVERITY_RANK: Record<ClientFlag["severity"], number> = { HIGH: 3, MEDIUM: 2, INFORMATION: 1 };
+
+function groupFlagsByTreatment(flags: ClientFlag[], treatments: Treatment[]) {
+  const perTreatment = treatments.map((t) => ({
+    treatment: t,
+    flags: flags.filter((f) => f.treatment_ids.includes(t.id)),
+  }));
+  const general = flags.filter((f) => f.treatment_ids.length === 0);
+  return { perTreatment, general };
+}
 
 export default function ConsultationForm() {
   const navigate = useNavigate();
@@ -35,12 +56,18 @@ export default function ConsultationForm() {
     Object.fromEntries(MEDICAL_ASSESSMENT_QUESTIONS.map((q) => [q.key, { value: false }]))
   );
   const [legalName, setLegalName] = useState("");
-  const [signatureTyped, setSignatureTyped] = useState("");
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   const [signatureConfirmed, setSignatureConfirmed] = useState(false);
-  const [consentWithoutPatchTest, setConsentWithoutPatchTest] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [touchedProfileFields, setTouchedProfileFields] = useState<Set<string>>(new Set());
+
+  // Populated once phase 1 (submitConsultation) responds.
+  const [consultationId, setConsultationId] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [flags, setFlags] = useState<ClientFlag[]>([]);
+  const [selectedTreatmentRecords, setSelectedTreatmentRecords] = useState<Treatment[]>([]);
+  const [decision, setDecision] = useState<ClientDecision | null>(null);
 
   useEffect(() => {
     getTreatments()
@@ -90,14 +117,10 @@ export default function ConsultationForm() {
   const profileComplete = Object.keys(profileFieldErrors).length === 0;
 
   const medicalComplete = MEDICAL_ASSESSMENT_QUESTIONS.every((q) => typeof answers[q.key]?.value === "boolean");
-
   const treatmentComplete = selectedTreatmentIds.length > 0;
-
   const patchTestComplete = PATCH_TEST_QUESTIONS.every((q) => typeof answers[q.key]?.value === "boolean");
-
-  const declarationComplete = consentWithoutPatchTest !== null;
-
-  const signatureComplete = legalName.trim().length > 1 && signatureTyped.trim().length > 1 && signatureConfirmed;
+  const reviewFlagsComplete = decision !== null;
+  const signatureComplete = legalName.trim().length > 1 && signatureConfirmed && !!signatureDataUrl;
 
   const canAdvance = useMemo(() => {
     switch (step) {
@@ -112,13 +135,16 @@ export default function ConsultationForm() {
       case "patch_test":
         return patchTestComplete;
       case "declaration":
-        return declarationComplete;
+        return true;
+      case "review_flags":
+        return reviewFlagsComplete;
       case "signature":
         return signatureComplete;
     }
-  }, [step, profileComplete, medicalComplete, treatmentComplete, patchTestComplete, declarationComplete, signatureComplete]);
+  }, [step, profileComplete, medicalComplete, treatmentComplete, patchTestComplete, reviewFlagsComplete, signatureComplete]);
 
-  async function handleSubmit() {
+  // Phase 1: submit answers + treatments, get back the flags to review.
+  async function handleInitialSubmit() {
     setSubmitting(true);
     setError(null);
     try {
@@ -144,16 +170,35 @@ export default function ConsultationForm() {
         },
         answers: answerList,
         treatment_ids: selectedTreatmentIds,
-        signature: {
-          method: "typed",
-          legal_name: legalName.trim(),
-          signature_value: signatureTyped.trim(),
-          consent_without_patch_test: consentWithoutPatchTest ?? false,
-        },
       });
 
-      navigate(`/consultation/${result.consultation_id}/submitted`, {
-        state: { accessToken: result.access_token },
+      setConsultationId(result.consultation_id);
+      setAccessToken(result.access_token);
+      setFlags(result.flags);
+      setSelectedTreatmentRecords(result.treatments);
+      setStepIndex(STEPS.indexOf("review_flags"));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Phase 2: acknowledgement + decision + signature. Locks the consultation.
+  async function handleFinalize() {
+    if (!consultationId || !accessToken || !decision || !signatureDataUrl) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await finalizeConsultation(consultationId, accessToken, {
+        decision,
+        acknowledged_flag_ids: flags.map((f) => f.id),
+        signature: { method: "drawn", legal_name: legalName.trim(), signature_value: signatureDataUrl },
+        device_info: { user_agent: navigator.userAgent, screen: `${screen.width}x${screen.height}` },
+      });
+
+      navigate(`/consultation/${consultationId}/submitted`, {
+        state: { accessToken, decision },
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
@@ -163,16 +208,26 @@ export default function ConsultationForm() {
   }
 
   function goNext() {
+    if (step === "declaration") {
+      handleInitialSubmit();
+      return;
+    }
     if (step === "signature") {
-      handleSubmit();
+      handleFinalize();
       return;
     }
     setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
   }
 
   function goBack() {
+    // Once phase 1 has run, going back to re-edit answers would desync the
+    // flags already computed from them — keep review/signature self-contained
+    // instead of allowing a stale-data edge case.
+    if (step === "review_flags" || step === "signature") return;
     setStepIndex((i) => Math.max(i - 1, 0));
   }
+
+  const { perTreatment, general } = groupFlagsByTreatment(flags, selectedTreatmentRecords);
 
   return (
     <div className="kaaya-shell">
@@ -326,40 +381,107 @@ export default function ConsultationForm() {
             medical details can lead to adverse reactions. I consent to the chosen treatment being performed by
             Kaaya.
           </p>
-          <div className="kaaya-field">
-            <label>Do you consent to treatment without a patch test?</label>
-            <div className="kaaya-yesno">
-              <button type="button" aria-pressed={consentWithoutPatchTest === true} onClick={() => setConsentWithoutPatchTest(true)}>
-                Yes
-              </button>
-              <button type="button" aria-pressed={consentWithoutPatchTest === false} onClick={() => setConsentWithoutPatchTest(false)}>
-                No
-              </button>
+          <p style={{ color: "var(--kaaya-text-muted)", fontSize: "0.9rem" }}>
+            Next, Kaaya will review your answers against the selected treatment(s) and show you anything relevant
+            before you sign.
+          </p>
+        </div>
+      )}
+
+      {step === "review_flags" && (
+        <div className="kaaya-card">
+          <h2 style={{ marginTop: 0 }}>Before you finish</h2>
+          {flags.length > 0 ? (
+            <p>
+              We have identified information in your consultation that may affect whether your selected
+              treatment(s) can be carried out.
+            </p>
+          ) : (
+            <p>We didn't identify anything that needs your attention for the treatment(s) you've selected.</p>
+          )}
+
+          {perTreatment.map(({ treatment, flags: treatmentFlags }) =>
+            treatmentFlags.length > 0 ? (
+              <div key={treatment.id} style={{ marginBottom: 16 }}>
+                <h3 style={{ fontSize: "1rem", marginBottom: 8 }}>{treatment.name}</h3>
+                <p style={{ marginTop: 0, fontSize: "0.9rem" }}>You told us:</p>
+                <ul style={{ marginTop: 0, paddingLeft: 20 }}>
+                  {treatmentFlags.map((f) => (
+                    <li key={f.id} style={{ marginBottom: 4 }}>
+                      {f.client_answer_summary}
+                    </li>
+                  ))}
+                </ul>
+                {[...treatmentFlags]
+                  .sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity])
+                  .map((f) => (
+                    <div key={f.id} className={`kaaya-flag-review kaaya-flag-review--${f.severity}`}>
+                      {f.explanation}
+                    </div>
+                  ))}
+              </div>
+            ) : null
+          )}
+
+          {general.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: 8 }}>Other information</h3>
+              {general.map((f) => (
+                <div key={f.id} className={`kaaya-flag-review kaaya-flag-review--${f.severity}`}>
+                  {f.explanation}
+                </div>
+              ))}
             </div>
+          )}
+
+          <div className="kaaya-notice">
+            <strong>Important:</strong> Completing this consultation does not guarantee that the treatment will be
+            carried out. A treatment may need to be postponed or declined if required checks have not been
+            completed, or if our treatment policy requires this.
+          </div>
+
+          <div
+            className="kaaya-decision-option"
+            data-selected={decision === "continue"}
+            onClick={() => setDecision("continue")}
+          >
+            <input type="radio" checked={decision === "continue"} readOnly />
+            <span>I understand the information above and would like to continue with my appointment.</span>
+          </div>
+          <div
+            className="kaaya-decision-option"
+            data-selected={decision === "decline"}
+            onClick={() => setDecision("decline")}
+          >
+            <input type="radio" checked={decision === "decline"} readOnly />
+            <span>I do not wish to continue with my appointment at this time.</span>
           </div>
         </div>
       )}
 
       {step === "signature" && (
         <div className="kaaya-card">
+          <h2 style={{ marginTop: 0 }}>Electronic Signature</h2>
+          <p>
+            I confirm that I have personally completed this consultation and that the information I have provided
+            is accurate and complete.
+          </p>
+          <p style={{ color: "var(--kaaya-text-muted)", fontSize: "0.9rem" }}>
+            I understand that my electronic signature is being used to confirm this consultation and the
+            information provided.
+          </p>
+          <label className="kaaya-checkbox-row">
+            <input type="checkbox" checked={signatureConfirmed} onChange={(e) => setSignatureConfirmed(e.target.checked)} />
+            <span>I confirm</span>
+          </label>
           <div className="kaaya-field">
             <label htmlFor="legal_name">Legal name</label>
             <input id="legal_name" type="text" value={legalName} onChange={(e) => setLegalName(e.target.value)} />
           </div>
           <div className="kaaya-field">
-            <label htmlFor="signature_typed">Type your name to sign</label>
-            <input
-              id="signature_typed"
-              type="text"
-              value={signatureTyped}
-              onChange={(e) => setSignatureTyped(e.target.value)}
-              style={{ fontStyle: "italic" }}
-            />
+            <label>Please sign below using your finger, stylus or mouse.</label>
+            <SignaturePad onChange={setSignatureDataUrl} />
           </div>
-          <label className="kaaya-checkbox-row">
-            <input type="checkbox" checked={signatureConfirmed} onChange={(e) => setSignatureConfirmed(e.target.checked)} />
-            <span>I confirm the typed name above is my signature and that I have read the declaration.</span>
-          </label>
         </div>
       )}
 
@@ -370,13 +492,19 @@ export default function ConsultationForm() {
       )}
 
       <div className="kaaya-btn-row">
-        {stepIndex > 0 && (
+        {stepIndex > 0 && step !== "review_flags" && step !== "signature" && (
           <button className="kaaya-btn kaaya-btn--secondary" onClick={goBack} disabled={submitting}>
             Back
           </button>
         )}
         <button className="kaaya-btn" onClick={goNext} disabled={!canAdvance || submitting}>
-          {submitting ? "Submitting…" : step === "signature" ? "Submit consultation" : "Continue"}
+          {submitting
+            ? "Please wait…"
+            : step === "declaration"
+              ? "Continue"
+              : step === "signature"
+                ? "Submit & Sign"
+                : "Continue"}
         </button>
       </div>
     </div>

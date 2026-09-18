@@ -125,7 +125,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
   const { data: consultation, error } = await admin
     .from("consultations")
     .select(
-      `id, status, version, submitted_at, screened_at, reviewed_at, valid_until, supersedes_consultation_id,
+      `id, status, version, submitted_at, screened_at, reviewed_at, locked_at, valid_until, supersedes_consultation_id,
        clients(id, first_name, last_name, email, phone, address)`
     )
     .eq("id", consultationId)
@@ -142,6 +142,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
     { data: reviews },
     { data: supersededBy },
     { data: renewalSetting },
+    { data: acknowledgement },
   ] = await Promise.all([
     admin
       .from("consultation_answers")
@@ -152,7 +153,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
     admin
       .from("consultation_flags")
       .select(
-        "id, severity, title, client_answer_summary, explanation, staff_action, created_at, treatment_ids, group_key"
+        "id, severity, category, title, client_answer_summary, explanation, staff_action, created_at, treatment_ids, group_key"
       )
       .eq("consultation_id", consultationId)
       .order("severity"),
@@ -170,6 +171,11 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
       .order("decided_at", { ascending: false }),
     admin.from("consultations").select("id").eq("supersedes_consultation_id", consultationId).maybeSingle(),
     admin.from("app_settings").select("value").eq("key", "renewal_reminder_days_before_expiry").maybeSingle(),
+    admin
+      .from("consultation_acknowledgements")
+      .select("client_decision, flag_ids, acknowledged_at")
+      .eq("consultation_id", consultationId)
+      .maybeSingle(),
   ]);
 
   await recordAuditEvent(admin, {
@@ -193,6 +199,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
     flags,
     signature,
     staff_reviews: reviews,
+    acknowledgement,
   });
 }
 

@@ -7,6 +7,7 @@ import type { Severity } from "@shared/types";
 type Flag = {
   id: string;
   severity: Severity;
+  category: string | null;
   title: string;
   client_answer_summary: string;
   explanation: string;
@@ -25,11 +26,18 @@ type Answer = {
 
 type ValidityStatus = "current" | "due_for_renewal" | "expired" | "superseded" | "unknown";
 
+type Acknowledgement = {
+  client_decision: "continue" | "decline";
+  flag_ids: string[];
+  acknowledged_at: string;
+};
+
 type Detail = {
   id: string;
   status: string;
   version: number;
   submitted_at: string | null;
+  locked_at: string | null;
   valid_until: string | null;
   validity_status: ValidityStatus;
   supersedes_consultation_id: string | null;
@@ -40,12 +48,15 @@ type Detail = {
   flags: Flag[];
   signature: {
     legal_name: string;
+    signature_value: string;
+    method: "typed" | "drawn";
     is_provisional: boolean;
     consent_without_patch_test: boolean;
     signed_at: string;
     declaration_version: number;
   } | null;
   staff_reviews: { id: string; decision: string; notes: string | null; decided_at: string; staff_profiles: { full_name: string } | null }[];
+  acknowledgement: Acknowledgement | null;
 };
 
 const DECISIONS = [
@@ -250,6 +261,31 @@ export default function StaffConsultationDetail() {
       </div>
 
       <div className="kaaya-card">
+        <h2 style={{ marginTop: 0 }}>Client acknowledgement</h2>
+        {data.acknowledgement ? (
+          <>
+            <p style={{ margin: "4px 0" }}>✓ Client reviewed identified attention items</p>
+            <p style={{ margin: "4px 0" }}>✓ Client acknowledged the information</p>
+            <p style={{ margin: "4px 0" }}>
+              {data.acknowledgement.client_decision === "continue" ? (
+                <>✓ Client wishes to continue with their appointment</>
+              ) : (
+                <span className="kaaya-badge kaaya-badge--HIGH">✗ Client does not wish to proceed</span>
+              )}
+            </p>
+            <p style={{ fontSize: "0.85rem", color: "var(--kaaya-text-muted)", marginTop: 10 }}>
+              Acknowledged {new Date(data.acknowledgement.acknowledged_at).toLocaleString()}. The client's decision
+              does not remove any outstanding requirement below — staff must still follow Kaaya's treatment policy.
+            </p>
+          </>
+        ) : (
+          <p style={{ color: "var(--kaaya-text-muted)" }}>
+            Not yet completed — the client has not acknowledged their flags or signed.
+          </p>
+        )}
+      </div>
+
+      <div className="kaaya-card">
         <h2 style={{ marginTop: 0 }}>Pre-treatment review</h2>
         <p style={{ color: "var(--kaaya-text-muted)" }}>
           {data.treatments.length} treatment{data.treatments.length === 1 ? "" : "s"} selected
@@ -301,11 +337,24 @@ export default function StaffConsultationDetail() {
           </div>
         ))}
         {data.signature && (
-          <p style={{ marginTop: 16 }}>
-            Signed by <strong>{data.signature.legal_name}</strong> on {new Date(data.signature.signed_at).toLocaleString()}
-            {data.signature.is_provisional && " (typed signature — legal status pending business confirmation)"}
-            {data.signature.consent_without_patch_test && " — consented to treatment without a patch test"}
-          </p>
+          <div style={{ marginTop: 16 }}>
+            <p>
+              Signed by <strong>{data.signature.legal_name}</strong> on{" "}
+              {new Date(data.signature.signed_at).toLocaleString()}
+              {data.signature.is_provisional && " (legal status pending business confirmation)"}
+            </p>
+            {data.signature.method === "drawn" ? (
+              <img
+                src={data.signature.signature_value}
+                alt={`Signature of ${data.signature.legal_name}`}
+                style={{ maxWidth: 300, border: "1px solid var(--kaaya-border)", borderRadius: 8, background: "#fff" }}
+              />
+            ) : (
+              <p style={{ fontStyle: "italic", color: "var(--kaaya-text-muted)" }}>
+                Typed signature: {data.signature.signature_value}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
