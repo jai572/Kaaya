@@ -162,16 +162,13 @@ export default function StaffConsultationDetail() {
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load consultation"));
   }
 
+  // TEMPORARY (2026-09-18, requested for easier testing): login gate removed.
+  // TO RE-ENABLE: restore the supabase.auth.getSession() check that redirected
+  // to /staff/login before calling load().
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: sessionData }) => {
-      if (!sessionData.session) {
-        navigate("/staff/login");
-        return;
-      }
-      load();
-    });
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, navigate]);
+  }, [id]);
 
   function toggle(key: string) {
     setExpanded((prev) => {

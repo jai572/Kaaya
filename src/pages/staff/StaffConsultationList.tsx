@@ -32,16 +32,13 @@ export default function StaffConsultationList() {
   const [rows, setRows] = useState<ListRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // TEMPORARY (2026-09-18, requested for easier testing): login gate removed.
+  // TO RE-ENABLE: restore the `if (!data.session) { navigate("/staff/login"); return; }`
+  // check before calling staffListConsultations().
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        navigate("/staff/login");
-        return;
-      }
-      staffListConsultations()
-        .then((res) => setRows((res as { consultations: ListRow[] }).consultations))
-        .catch((e) => setError(e instanceof Error ? e.message : "Could not load consultations"));
-    });
+    staffListConsultations()
+      .then((res) => setRows((res as { consultations: ListRow[] }).consultations))
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not load consultations"));
   }, [navigate]);
 
   return (
