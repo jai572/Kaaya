@@ -64,10 +64,7 @@ export default function Treatments() {
 
         <section className="site-section site-section--tight">
           <div className="site-container">
-            <CTASection
-              title="Not sure which treatment is right for you?"
-              body="Complete a short consultation first so Kaaya can flag anything relevant before your appointment."
-            />
+            <CTASection />
           </div>
         </section>
       </main>

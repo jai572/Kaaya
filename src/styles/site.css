@@ -544,6 +544,11 @@ h3,
   }
 }
 
+.site-cta-band--center-actions {
+  align-items: center;
+  justify-content: center;
+}
+
 .site-cta-band__actions {
   display: flex;
   flex-wrap: wrap;

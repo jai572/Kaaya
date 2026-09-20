@@ -79,7 +79,7 @@ export default function Home() {
 
         <section className="site-section site-section--sky">
           <div className="site-container">
-            <SectionHeading eyebrow="Kaaya, in short" title="Why clients come to Kaaya" />
+            <SectionHeading title="Why clients come to Kaaya" />
             <div className="site-grid site-grid--3">
               <div className="site-treatment-card site-treatment-card--flat">
                 <h3 className="site-treatment-card__name">Established in Aberdeen</h3>
@@ -106,7 +106,7 @@ export default function Home() {
 
         <section className="site-section">
           <div className="site-container">
-            <SectionHeading eyebrow="Gallery" title="A look at Kaaya" />
+            <SectionHeading title="A look at Kaaya" />
             <Gallery />
           </div>
         </section>
@@ -122,7 +122,7 @@ export default function Home() {
 
         <section className="site-section site-section--tight">
           <div className="site-container">
-            <SectionHeading eyebrow="Visit" title="Find Kaaya" center />
+            <SectionHeading title="Find Kaaya" center />
             <ContactSection />
           </div>
         </section>
