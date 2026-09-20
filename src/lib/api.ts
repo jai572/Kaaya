@@ -13,17 +13,10 @@ async function request(path: string, options: RequestInit = {}) {
   return body;
 }
 
-// TEMPORARY (2026-09-18, requested for easier testing): returns no
-// Authorization header when signed out instead of throwing, so staff pages
-// work without login. The Worker falls back to a default staff identity in
-// that case (see worker/lib/auth.ts bypassStaffAuth). If a real session
-// exists, its token is still sent and verified normally.
-// TO RE-ENABLE LOGIN: throw new Error("Not signed in") when there's no token,
-// as this used to.
 async function staffAuthHeader(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
-  if (!token) return {};
+  if (!token) throw new Error("Not signed in");
   return { Authorization: `Bearer ${token}` };
 }
 
