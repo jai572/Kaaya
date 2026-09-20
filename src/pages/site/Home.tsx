@@ -17,7 +17,7 @@ export default function Home() {
   useSeo({
     title: "Kaaya",
     description:
-      "Kaaya — eyebrows, threading, tinting, waxing, henna, lash lift and extensions, and nails, at Bon Accord Shopping Centre, Aberdeen.",
+      "Kaaya — an established Brow Bar in Aberdeen, highly experienced in threading, tinting, waxing, henna, lashes and nails, at Bon Accord Shopping Centre.",
     path: "/",
   });
 
@@ -81,10 +81,10 @@ export default function Home() {
             <SectionHeading eyebrow="Kaaya, in short" title="Why clients come to Kaaya" />
             <div className="site-grid site-grid--3">
               <div className="site-treatment-card site-treatment-card--flat">
-                <h3 className="site-treatment-card__name">A focused menu</h3>
+                <h3 className="site-treatment-card__name">Established in Aberdeen</h3>
                 <p className="site-treatment-card__summary">
-                  Eyebrows, threading, tinting, waxing, henna, eyelash lift and extensions, nails,
-                  manicures and pedicures — Kaaya's full service list, nothing padded out.
+                  Highly experienced in threading — the ancient art of eyebrow shaping and hair
+                  removal — alongside tinting, waxing, henna, lashes and nails.
                 </p>
               </div>
               <div className="site-treatment-card site-treatment-card--flat">

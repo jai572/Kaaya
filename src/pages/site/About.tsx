@@ -3,12 +3,13 @@ import Footer from "../../components/site/Footer";
 import SectionHeading from "../../components/site/SectionHeading";
 import CTASection from "../../components/site/CTASection";
 import { useSeo } from "../../lib/seo";
-import { CORE_SERVICES, CONTACT } from "../../config/site";
+import { CORE_SERVICES, CONTACT, BUSINESS_DESCRIPTION } from "../../config/site";
 
 export default function About() {
   useSeo({
     title: "About",
-    description: "About Kaaya — Aberdeen's threading, tinting and nail studio in Bon Accord Shopping Centre.",
+    description:
+      "Kaaya is an established Brow Bar in Aberdeen, highly experienced in threading, tinting, waxing, lashes and nails — in Bon Accord Shopping Centre.",
     path: "/about",
   });
 
@@ -18,18 +19,16 @@ export default function About() {
       <main id="main-content" className="site-page">
         <section className="site-section site-section--tight">
           <div className="site-container site-container--narrow">
-            <SectionHeading eyebrow="About Kaaya" title="A focused beauty studio in the heart of Aberdeen" />
-            <p className="site-lede">
-              Kaaya is based in {CONTACT.addressLine1}, {CONTACT.addressLine2}, offering eyebrow
-              shaping, threading, tinting, waxing, henna, eyelash lift and extensions, and a full
-              nail menu — with both walk-in and appointment booking available.
-            </p>
+            <SectionHeading eyebrow="About Kaaya" title="An established Brow Bar in Aberdeen" />
+            {BUSINESS_DESCRIPTION.split("\n\n").map((paragraph) => (
+              <p className="site-lede" key={paragraph.slice(0, 24)}>
+                {paragraph}
+              </p>
+            ))}
 
             <div className="site-note">
-              Kaaya's founding story and team profiles aren't in the source material supplied for
-              this build. This section is intentionally left short rather than filled with
-              invented history — send over the story/team copy and photos and this becomes a full
-              About page.
+              Team and founder profiles aren't in the source material supplied for this build —
+              send over that copy and photos and this section can name the people behind Kaaya.
             </div>
           </div>
         </section>

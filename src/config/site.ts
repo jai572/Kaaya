@@ -4,6 +4,12 @@
 
 export const BUSINESS_NAME = "Kaaya";
 
+// Kaaya's own long-standing Facebook page description (eye.brow.threading.aberdeen) —
+// live there for years, so treated as verified brand copy rather than invented.
+export const BUSINESS_DESCRIPTION = `We are an established Brow Bar in Aberdeen, highly experienced in all aspects of Threading — an ancient art of eyebrow shaping and unwanted hair removal — and we aim to satisfy all your hair & beauty needs. We provide treatments for facial threading, eyebrow/eyelash tinting, eyelash extensions, face waxing, manicure/pedicure and henna body tattoos.
+
+We are conveniently located right in the middle of Aberdeen city-centre shopping mall, Bon Accord.`;
+
 export const CONTACT = {
   phone: "07378 454500",
   phoneHref: "tel:+447378454500",
