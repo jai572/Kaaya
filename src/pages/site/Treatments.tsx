@@ -7,9 +7,9 @@ import { TREATMENT_CATEGORIES } from "../../config/site";
 
 export default function Treatments() {
   useSeo({
-    title: "Treatments & Prices",
+    title: "Beauty Treatments & Prices | Kaaya Aberdeen",
     description:
-      "The full Kaaya treatment menu and prices — eyebrows, threading, tinting, waxing, henna, eyelash extensions, brow lamination and nails.",
+      "View Kaaya's beauty treatment menu and prices in Aberdeen, including threading, brows, tinting, waxing, lashes, henna and nails.",
     path: "/treatments",
   });
 
@@ -20,6 +20,7 @@ export default function Treatments() {
         <section className="site-section site-section--tight">
           <div className="site-container">
             <SectionHeading
+              as="h1"
               eyebrow="Menu"
               title="Treatments & prices"
               body="The full Kaaya price list. Treatments marked “patch test required” need a patch test at least 48 hours before your appointment."
@@ -55,7 +56,7 @@ export default function Treatments() {
             ))}
 
             <p className="site-note">
-              Nail add-ons — glitter Shellac, glitter powder and nail art — are charged extra, as
+              Nail add-ons - glitter Shellac, glitter powder and nail art - are charged extra, as
               printed on the Kaaya price list.
             </p>
           </div>

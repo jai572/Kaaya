@@ -7,9 +7,9 @@ import { CORE_SERVICES, CONTACT, BUSINESS_DESCRIPTION } from "../../config/site"
 
 export default function About() {
   useSeo({
-    title: "About",
+    title: "About Kaaya | Established Brow Bar in Aberdeen",
     description:
-      "Kaaya is an established Brow Bar in Aberdeen, highly experienced in threading, tinting, waxing, lashes and nails — in Bon Accord Shopping Centre.",
+      "Learn about Kaaya, an established Brow Bar in Aberdeen offering threading, tinting, waxing, lashes, henna and nail treatments.",
     path: "/about",
   });
 
@@ -19,17 +19,12 @@ export default function About() {
       <main id="main-content" className="site-page">
         <section className="site-section site-section--tight">
           <div className="site-container site-container--narrow">
-            <SectionHeading eyebrow="About Kaaya" title="An established Brow Bar in Aberdeen" />
+            <SectionHeading as="h1" eyebrow="About Kaaya" title="About Kaaya" />
             {BUSINESS_DESCRIPTION.split("\n\n").map((paragraph) => (
               <p className="site-lede" key={paragraph.slice(0, 24)}>
                 {paragraph}
               </p>
             ))}
-
-            <div className="site-note">
-              Team and founder profiles aren't in the source material supplied for this build —
-              send over that copy and photos and this section can name the people behind Kaaya.
-            </div>
           </div>
         </section>
 

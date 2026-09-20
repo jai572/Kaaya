@@ -7,8 +7,8 @@ import { useSeo } from "../../lib/seo";
 
 export default function GalleryPage() {
   useSeo({
-    title: "Gallery",
-    description: "A look at Kaaya's work — brows, lashes, henna and nails.",
+    title: "Kaaya Gallery | Brows, Lashes, Henna & Nails in Aberdeen",
+    description: "See Kaaya's work across brows, lashes, henna and nails at Bon Accord Shopping Centre in Aberdeen.",
     path: "/gallery",
   });
 
@@ -19,9 +19,10 @@ export default function GalleryPage() {
         <section className="site-section site-section--tight">
           <div className="site-container">
             <SectionHeading
+              as="h1"
               eyebrow="Gallery"
               title="A look at Kaaya"
-              body="Only one image from Kaaya's own material was supplied for this build — the rest are marked as placeholders rather than filled with stock photography."
+              body="A look at Kaaya's work across brows, lashes, henna and nails."
             />
             <Gallery />
           </div>

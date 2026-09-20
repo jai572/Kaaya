@@ -3,7 +3,7 @@ type Props = {
   title: string;
   body?: string;
   center?: boolean;
-  as?: "h2" | "h3";
+  as?: "h1" | "h2" | "h3";
 };
 
 export default function SectionHeading({ eyebrow, title, body, center, as = "h2" }: Props) {

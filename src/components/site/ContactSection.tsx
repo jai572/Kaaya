@@ -33,7 +33,7 @@ export default function ContactSection() {
             {CONTACT.openingHours ? (
               CONTACT.openingHours.map((line) => <div key={line}>{line}</div>)
             ) : (
-              <span className="site-contact-item__empty">Not yet published — call ahead to confirm.</span>
+              <span className="site-contact-item__empty">Not yet published - call ahead to confirm.</span>
             )}
           </div>
         </div>
@@ -50,7 +50,7 @@ export default function ContactSection() {
 
       <div className="site-map-frame">
         <iframe
-          title="Kaaya location — Bon Accord Shopping Centre, Aberdeen"
+          title="Kaaya location - Bon Accord Shopping Centre, Aberdeen"
           loading="lazy"
           src="https://www.google.com/maps?q=Bon+Accord+Shopping+Centre+Aberdeen&output=embed"
         />

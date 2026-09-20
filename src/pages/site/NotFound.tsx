@@ -18,7 +18,7 @@ export default function NotFound() {
           <div className="site-container site-container--narrow site-notfound">
             <h1 className="site-notfound__title">Page not found</h1>
             <p className="site-lede site-notfound__body">
-              That page doesn't exist — it may have moved, or the link may be out of date.
+              That page doesn't exist - it may have moved, or the link may be out of date.
             </p>
             <Button to="/">Back to Kaaya home</Button>
           </div>

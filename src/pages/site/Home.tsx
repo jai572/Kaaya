@@ -15,9 +15,9 @@ import logoWhiteBorder from "../../assets/brand/logo-navy-white-border.png";
 
 export default function Home() {
   useSeo({
-    title: "Kaaya",
+    title: "Kaaya | Brow Bar, Threading, Lashes & Nails in Aberdeen",
     description:
-      "Kaaya — an established Brow Bar in Aberdeen, highly experienced in threading, tinting, waxing, henna, lashes and nails, at Bon Accord Shopping Centre.",
+      "Kaaya is an established brow and beauty studio at Bon Accord Shopping Centre in Aberdeen, offering threading, tinting, waxing, lashes, henna and nails.",
     path: "/",
   });
 
@@ -34,9 +34,8 @@ export default function Home() {
               and nails, done properly.
             </h1>
             <p className="site-hero__lede">
-              Kaaya is Aberdeen's threading, tinting and nail studio — precise eyebrow shaping,
-              lash lift and extensions, henna, and a full nail menu, from a team that does this
-              every day.
+              Kaaya is Aberdeen's threading, tinting and nail studio - specialising in eyebrow
+              shaping, lash lifts and extensions, henna and nails.
             </p>
             <div className="site-hero__actions">
               <Button to={BOOKING_URL ?? CONTACT.phoneHref} external={!!BOOKING_URL}>
@@ -50,7 +49,7 @@ export default function Home() {
           <div className="site-hero__media">
             <picture>
               <source media="(max-width: 640px)" srcSet={heroMobileWebp} />
-              <img src={heroWebp} alt="Kaaya beauty styling — brows, lashes and nails" />
+              <img src={heroWebp} alt="Kaaya beauty styling - brows, lashes and nails" />
             </picture>
             <img src={logoWhiteBorder} alt="" aria-hidden="true" className="site-hero__media-logo" />
           </div>
@@ -61,7 +60,7 @@ export default function Home() {
             <SectionHeading
               eyebrow="What we do"
               title="Treatments"
-              body="Everything on the Kaaya menu — the full price list lives on the treatments page."
+              body="Everything on the Kaaya menu - the full price list lives on the treatments page."
             />
             <div className="site-grid site-grid--3">
               {TREATMENT_CATEGORIES.slice(0, 6).map((cat) => (
@@ -83,21 +82,20 @@ export default function Home() {
               <div className="site-treatment-card site-treatment-card--flat">
                 <h3 className="site-treatment-card__name">Established in Aberdeen</h3>
                 <p className="site-treatment-card__summary">
-                  Highly experienced in threading — the ancient art of eyebrow shaping and hair
-                  removal — alongside tinting, waxing, henna, lashes and nails.
+                  Experienced in threading - the ancient art of eyebrow shaping and hair removal -
+                  alongside tinting, waxing, henna, lashes and nails.
                 </p>
               </div>
               <div className="site-treatment-card site-treatment-card--flat">
-                <h3 className="site-treatment-card__name">Walk-in or booked</h3>
+                <h3 className="site-treatment-card__name">Walk-ins and appointments</h3>
                 <p className="site-treatment-card__summary">
-                  Walk-in and appointment booking are both available, so you can fit Kaaya around
-                  your day.
+                  Walk-ins and appointments are both welcome, so you can fit Kaaya around your day.
                 </p>
               </div>
               <div className="site-treatment-card site-treatment-card--flat">
                 <h3 className="site-treatment-card__name">Right in Bon Accord</h3>
                 <p className="site-treatment-card__summary">
-                  Based in Bon Accord Shopping Centre, Aberdeen — easy to reach, easy to find.
+                  Based in Bon Accord Shopping Centre, Aberdeen - easy to reach and easy to find.
                 </p>
               </div>
             </div>
@@ -115,7 +113,7 @@ export default function Home() {
           <div className="site-container">
             <CTASection
               title="Ready to book?"
-              body={`Call ${CONTACT.phone} or walk in — appointments and walk-ins are both welcome.`}
+              body={`Call ${CONTACT.phone} or walk in - appointments and walk-ins are both welcome.`}
             />
           </div>
         </section>

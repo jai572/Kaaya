@@ -36,7 +36,7 @@ function setLink(rel: string, href: string) {
 // this is the entire requirement, a hook is enough.
 export function useSeo({ title, description, path }: SeoOptions) {
   useEffect(() => {
-    const fullTitle = title === SITE_NAME ? title : `${title} | ${SITE_NAME}`;
+    const fullTitle = title.includes(SITE_NAME) ? title : `${title} | ${SITE_NAME}`;
     document.title = fullTitle;
 
     setMeta("name", "description", description);

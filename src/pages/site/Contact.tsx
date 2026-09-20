@@ -8,8 +8,9 @@ import { BOOKING_URL, CONTACT, CONSULTATION_ROUTE } from "../../config/site";
 
 export default function Contact() {
   useSeo({
-    title: "Contact",
-    description: "Contact Kaaya — phone, email, and location at Bon Accord Shopping Centre, Aberdeen.",
+    title: "Contact Kaaya | Bon Accord Shopping Centre, Aberdeen",
+    description:
+      "Contact Kaaya at Bon Accord Shopping Centre, Aberdeen. Find our phone number, email, location and Facebook contact.",
     path: "/contact",
   });
 
@@ -19,7 +20,7 @@ export default function Contact() {
       <main id="main-content" className="site-page">
         <section className="site-section site-section--tight">
           <div className="site-container">
-            <SectionHeading eyebrow="Get in touch" title="Contact Kaaya" />
+            <SectionHeading as="h1" eyebrow="Get in touch" title="Contact Kaaya" />
             <ContactSection />
 
             <div className="site-hero__actions site-section__more">
