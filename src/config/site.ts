@@ -21,9 +21,7 @@ export const CONTACT = {
   facebookHandle: "eye.brow.threading.aberdeen",
   facebookUrl: "https://facebook.com/eye.brow.threading.aberdeen",
   instagramUrl: INSTAGRAM_URL,
-  // Not stated anywhere in the supplied leaflet. Do not invent hours —
-  // surface this to staff/owner and replace once confirmed.
-  openingHours: null as string[] | null,
+  openingHours: ["Mon - Sat: 9am to 6pm", "Sun: 11am to 5pm"] as string[] | null,
 };
 
 // BOOKING_URL is the single place this gets wired up; every CTA reads from

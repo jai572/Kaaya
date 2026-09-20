@@ -3,7 +3,7 @@ import Footer from "../../components/site/Footer";
 import SectionHeading from "../../components/site/SectionHeading";
 import CTASection from "../../components/site/CTASection";
 import { useSeo } from "../../lib/seo";
-import { TREATMENT_CATEGORIES } from "../../config/site";
+import { TREATMENT_CATEGORIES, CONTACT } from "../../config/site";
 
 export default function Treatments() {
   useSeo({
@@ -64,7 +64,10 @@ export default function Treatments() {
 
         <section className="site-section site-section--tight">
           <div className="site-container">
-            <CTASection />
+            <CTASection
+              title="Ready to book?"
+              body={`Call ${CONTACT.phone} or walk in - appointments and walk-ins are both welcome.`}
+            />
           </div>
         </section>
       </main>

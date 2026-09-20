@@ -41,10 +41,8 @@
   <meta name="twitter:image" content="https://kaaya.jb-38f.workers.dev/og-image.jpg" />
 
   <!--
-    LocalBusiness structured data - only verified facts from the Kaaya
-    leaflet/Facebook page. No openingHours (not supplied) or priceRange
-    (leaflet prices don't map cleanly to schema.org's $ / ££ convention) -
-    omitted rather than guessed.
+    LocalBusiness structured data - only verified facts. priceRange omitted
+    (leaflet prices don't map cleanly to schema.org's $ / ££ convention).
   -->
   <script type="application/ld+json">
     {
@@ -61,6 +59,20 @@
         "addressLocality": "Aberdeen",
         "addressCountry": "GB"
       },
+      "openingHoursSpecification": [
+        {
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "opens": "09:00",
+          "closes": "18:00"
+        },
+        {
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": ["Sunday"],
+          "opens": "11:00",
+          "closes": "17:00"
+        }
+      ],
       "sameAs": ["https://facebook.com/eye.brow.threading.aberdeen"]
     }
   </script>
@@ -89,6 +101,7 @@
         Email: <a href="mailto:info@kaaya-clinic.com">info@kaaya-clinic.com</a> &middot;
         Bon Accord Shopping Centre, Aberdeen
       </p>
+      <p>Opening hours: Mon - Sat 9am to 6pm, Sun 11am to 5pm.</p>
     </div>
   </noscript>
   <!--
