@@ -8,7 +8,7 @@ import CTASection from "../../components/site/CTASection";
 import Gallery from "../../components/site/Gallery";
 import ContactSection from "../../components/site/ContactSection";
 import { useSeo } from "../../lib/seo";
-import { BOOKING_URL, CONTACT, CONSULTATION_ROUTE, TREATMENT_CATEGORIES } from "../../config/site";
+import { BOOKING_URL, CONTACT, CONSULTATION_ROUTE, TREATMENT_CATEGORIES, SHOW_CONSULTATION } from "../../config/site";
 import heroWebp from "../../assets/brand/hero.webp";
 import heroMobileWebp from "../../assets/brand/hero-mobile.webp";
 import logoWhiteBorder from "../../assets/brand/logo-navy-white-border.png";
@@ -41,9 +41,11 @@ export default function Home() {
               <Button to={BOOKING_URL ?? CONTACT.phoneHref} external={!!BOOKING_URL}>
                 Book Appointment
               </Button>
-              <Button to={CONSULTATION_ROUTE} variant="secondary">
-                Complete Consultation
-              </Button>
+              {SHOW_CONSULTATION && (
+                <Button to={CONSULTATION_ROUTE} variant="secondary">
+                  Complete Consultation
+                </Button>
+              )}
             </div>
           </div>
           <div className="site-hero__media">

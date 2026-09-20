@@ -730,10 +730,27 @@ h3,
   padding-top: var(--site-space-4);
   display: flex;
   flex-wrap: wrap;
-  gap: var(--site-space-2);
+  gap: var(--site-space-3);
+  align-items: center;
   justify-content: space-between;
   font-size: 0.82rem;
   color: rgba(255, 255, 255, 0.6);
+}
+
+.site-footer__social {
+  display: flex;
+  align-items: center;
+  gap: var(--site-space-3);
+}
+
+.site-footer__social a {
+  display: inline-flex;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+
+.site-footer__social a:hover {
+  opacity: 1;
 }
 
 /* ---------- Misc ---------- */

@@ -4,7 +4,7 @@ import SectionHeading from "../../components/site/SectionHeading";
 import ContactSection from "../../components/site/ContactSection";
 import Button from "../../components/site/Button";
 import { useSeo } from "../../lib/seo";
-import { BOOKING_URL, CONTACT, CONSULTATION_ROUTE } from "../../config/site";
+import { BOOKING_URL, CONTACT, CONSULTATION_ROUTE, SHOW_CONSULTATION } from "../../config/site";
 
 export default function Contact() {
   useSeo({
@@ -27,9 +27,11 @@ export default function Contact() {
               <Button to={BOOKING_URL ?? CONTACT.phoneHref} external={!!BOOKING_URL}>
                 Book Appointment
               </Button>
-              <Button to={CONSULTATION_ROUTE} variant="secondary">
-                Complete Consultation
-              </Button>
+              {SHOW_CONSULTATION && (
+                <Button to={CONSULTATION_ROUTE} variant="secondary">
+                  Complete Consultation
+                </Button>
+              )}
             </div>
           </div>
         </section>

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { BOOKING_URL, CONTACT, CONSULTATION_ROUTE } from "../../config/site";
+import { BOOKING_URL, CONTACT, CONSULTATION_ROUTE, SHOW_CONSULTATION } from "../../config/site";
 import Button from "./Button";
 
 type Props = {
@@ -20,9 +20,11 @@ export default function CTASection({ title, body }: Props) {
             <Button to={BOOKING_URL ?? CONTACT.phoneHref} external={!!BOOKING_URL} variant="ghost-light">
               Book Appointment
             </Button>
-            <Button to={CONSULTATION_ROUTE} variant="ghost-light">
-              Complete Consultation
-            </Button>
+            {SHOW_CONSULTATION && (
+              <Button to={CONSULTATION_ROUTE} variant="ghost-light">
+                Complete Consultation
+              </Button>
+            )}
           </div>
         </div>
       </div>

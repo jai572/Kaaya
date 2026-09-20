@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { NAV_LINKS, CONSULTATION_ROUTE, BOOKING_URL, CONTACT } from "../../config/site";
+import { NAV_LINKS, CONSULTATION_ROUTE, BOOKING_URL, CONTACT, SHOW_CONSULTATION } from "../../config/site";
 import logoNavy from "../../assets/brand/logo-navy.png";
 import Button from "./Button";
 
@@ -44,9 +44,11 @@ export default function Header() {
           </nav>
 
           <div className="site-header__actions">
-            <Link to={CONSULTATION_ROUTE} className="site-header__consult-link">
-              Consultation
-            </Link>
+            {SHOW_CONSULTATION && (
+              <Link to={CONSULTATION_ROUTE} className="site-header__consult-link">
+                Consultation
+              </Link>
+            )}
             <Button to={BOOKING_URL ?? CONTACT.phoneHref} external={!!BOOKING_URL}>
               Book Appointment
             </Button>
@@ -71,9 +73,11 @@ export default function Header() {
               {link.label}
             </Link>
           ))}
-          <Link to={CONSULTATION_ROUTE} className="site-mobile-nav__link">
-            Consultation
-          </Link>
+          {SHOW_CONSULTATION && (
+            <Link to={CONSULTATION_ROUTE} className="site-mobile-nav__link">
+              Consultation
+            </Link>
+          )}
 
           <div className="site-mobile-nav__ctas">
             <Button to={BOOKING_URL ?? CONTACT.phoneHref} external={!!BOOKING_URL} block>

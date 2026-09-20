@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { NAV_LINKS, CONTACT, CONSULTATION_ROUTE, BUSINESS_NAME } from "../../config/site";
+import { NAV_LINKS, CONTACT, CONSULTATION_ROUTE, BUSINESS_NAME, SHOW_CONSULTATION } from "../../config/site";
 import logoWhite from "../../assets/brand/logo-white.png";
+import { FacebookIcon, InstagramIcon } from "./SocialIcons";
 
 export default function Footer() {
   return (
@@ -23,9 +24,11 @@ export default function Footer() {
                   <Link to={link.to}>{link.label}</Link>
                 </li>
               ))}
-              <li>
-                <Link to={CONSULTATION_ROUTE}>Consultation</Link>
-              </li>
+              {SHOW_CONSULTATION && (
+                <li>
+                  <Link to={CONSULTATION_ROUTE}>Consultation</Link>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -54,6 +57,14 @@ export default function Footer() {
 
         <div className="site-footer__bottom">
           <span>© {new Date().getFullYear()} {BUSINESS_NAME}</span>
+          <div className="site-footer__social">
+            <a href={CONTACT.facebookUrl} target="_blank" rel="noopener noreferrer" aria-label="Kaaya on Facebook">
+              <FacebookIcon />
+            </a>
+            <a href={CONTACT.instagramUrl} target="_blank" rel="noopener noreferrer" aria-label="Kaaya on Instagram">
+              <InstagramIcon />
+            </a>
+          </div>
           <span>Bon Accord Shopping Centre, Aberdeen</span>
         </div>
       </div>

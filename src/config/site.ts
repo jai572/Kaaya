@@ -10,6 +10,8 @@ export const BUSINESS_DESCRIPTION = `We are an established Brow Bar in Aberdeen,
 
 We are conveniently located right in the middle of Aberdeen city-centre shopping mall, Bon Accord.`;
 
+const INSTAGRAM_URL = "https://www.instagram.com/kaayalashnbrow?stkn=cG04cTFndDkzMWdi&utm_source=qr";
+
 export const CONTACT = {
   phone: "07378 454500",
   phoneHref: "tel:+447378454500",
@@ -18,18 +20,23 @@ export const CONTACT = {
   addressLine2: "Aberdeen",
   facebookHandle: "eye.brow.threading.aberdeen",
   facebookUrl: "https://facebook.com/eye.brow.threading.aberdeen",
+  instagramUrl: INSTAGRAM_URL,
   // Not stated anywhere in the supplied leaflet. Do not invent hours —
   // surface this to staff/owner and replace once confirmed.
   openingHours: null as string[] | null,
 };
 
-// No Square (or any) online booking URL appears in the supplied leaflet —
-// only "walk-in & appointment booking is available", a phone number, and
-// the "Kaaya Brow Bar" app. BOOKING_URL is the single place this gets
-// wired up once a real link exists; every CTA reads from here rather than
-// hard-coding a URL. Swapping Square for Kaaya's own /book later is a
+// BOOKING_URL is the single place this gets wired up; every CTA reads from
+// here rather than hard-coding a URL. Currently Kaaya's Instagram (bookings
+// are handled there); swapping in a dedicated booking engine later is a
 // one-line change in this file.
-export const BOOKING_URL: string | null = null;
+export const BOOKING_URL: string | null = INSTAGRAM_URL;
+
+// Hides every "Complete Consultation" link/button site-wide without
+// touching the route or the consultation flow itself - /consultation still
+// works for anyone with the direct link. Flip back to true to relist it in
+// navigation.
+export const SHOW_CONSULTATION = false;
 
 export const APP_LINKS = {
   name: "Kaaya Brow Bar",
@@ -113,13 +120,10 @@ export const TREATMENT_CATEGORIES: TreatmentCategory[] = [
     ],
   },
   {
-    slug: "henna-glitter-tattoos",
-    name: "Henna & Glitter Tattoos",
-    summary: "Henna and glitter body art.",
-    items: [
-      { name: "Henna Tattoos", price: "from £5" },
-      { name: "Glitter Tattoos", price: "from £3" },
-    ],
+    slug: "henna-tattoos",
+    name: "Henna Tattoos",
+    summary: "Henna body art.",
+    items: [{ name: "Henna Tattoos", price: "from £5" }],
   },
   {
     slug: "nails",
