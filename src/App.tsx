@@ -6,6 +6,7 @@ import About from "./pages/site/About";
 import GalleryPage from "./pages/site/GalleryPage";
 import Contact from "./pages/site/Contact";
 import Book from "./pages/site/Book";
+import NotFound from "./pages/site/NotFound";
 
 // The consultation/staff module pulls in @supabase/supabase-js and zod —
 // meaningful weight a marketing-page visitor never needs. Lazy-loading it
@@ -35,6 +36,8 @@ export default function App() {
         <Route path="/staff/login" element={<StaffLogin />} />
         <Route path="/staff" element={<StaffConsultationList />} />
         <Route path="/staff/consultations/:id" element={<StaffConsultationDetail />} />
+
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );

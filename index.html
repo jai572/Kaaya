@@ -12,7 +12,58 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <meta property="og:image" content="/favicon-512.png" />
+
+  <!--
+    Static (site-wide, not per-route) social-share metadata. useSeo overwrites
+    og:title/og:description/canonical per route once JS runs, but that update
+    never reaches social unfurl bots (Slack, WhatsApp, iMessage, Facebook,
+    LinkedIn) — none of them execute JS, they only read this raw HTML. So
+    every share of any page falls back to these Kaaya-wide defaults rather
+    than showing nothing.
+  -->
+  <meta property="og:site_name" content="Kaaya" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://kaaya.jb-38f.workers.dev/" />
+  <meta property="og:title" content="Kaaya | Eyebrows, Threading, Tinting, Nails — Aberdeen" />
+  <meta
+    property="og:description"
+    content="An established Brow Bar in Aberdeen — threading, tinting, waxing, henna, lashes and nails at Bon Accord Shopping Centre."
+  />
+  <meta property="og:image" content="https://kaaya.jb-38f.workers.dev/og-image.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Kaaya | Eyebrows, Threading, Tinting, Nails — Aberdeen" />
+  <meta
+    name="twitter:description"
+    content="An established Brow Bar in Aberdeen — threading, tinting, waxing, henna, lashes and nails at Bon Accord Shopping Centre."
+  />
+  <meta name="twitter:image" content="https://kaaya.jb-38f.workers.dev/og-image.jpg" />
+
+  <!--
+    LocalBusiness structured data — only verified facts from the Kaaya
+    leaflet/Facebook page. No openingHours (not supplied) or priceRange
+    (leaflet prices don't map cleanly to schema.org's $ / ££ convention) —
+    omitted rather than guessed.
+  -->
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BeautySalon",
+      "name": "Kaaya",
+      "image": "https://kaaya.jb-38f.workers.dev/og-image.jpg",
+      "url": "https://kaaya.jb-38f.workers.dev/",
+      "telephone": "+447378454500",
+      "email": "info@kaaya-clinic.com",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "Bon Accord Shopping Centre",
+        "addressLocality": "Aberdeen",
+        "addressCountry": "GB"
+      },
+      "sameAs": ["https://facebook.com/eye.brow.threading.aberdeen"]
+    }
+  </script>
 </head>
 <body>
   <div id="root"></div>

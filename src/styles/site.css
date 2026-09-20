@@ -753,6 +753,18 @@ h3,
   left: 0;
 }
 
+.site-notfound {
+  text-align: center;
+}
+
+.site-notfound__title {
+  font-size: 2.4rem;
+}
+
+.site-notfound__body {
+  margin: 16px auto 32px;
+}
+
 .site-lede {
   color: var(--kaaya-text-muted);
   line-height: 1.7;

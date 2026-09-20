@@ -3,6 +3,7 @@ import { errorResponse } from "./lib/http";
 import { listTreatments } from "./routes/treatments";
 import { submitConsultation, getClientConsultation, finalizeConsultation } from "./routes/consultations";
 import { listStaffConsultations, getStaffConsultation, recordStaffReview } from "./routes/staff";
+import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, path: string): Promise<Response> {
   const method = request.method;
@@ -69,6 +70,16 @@ export default {
     // canonicalization redirect (index.html -> /), which would just repeat
     // the same problem. "/" resolves to the same file without a redirect.
     const indexRequest = new Request(new URL("/", request.url), request);
-    return env.ASSETS.fetch(indexRequest);
+    const indexResponse = await env.ASSETS.fetch(indexRequest);
+
+    // A known client route (e.g. /staff/login on direct load/refresh) gets
+    // the SPA shell with 200 — it's a real page, just not a static asset.
+    // Anything else is a genuinely unknown path, so it gets the same shell
+    // (still a usable page, via the React NotFound route) but a real 404
+    // status — otherwise every bad link/typo reports 200, which search
+    // consoles flag as a soft-404 and which quietly breaks "does this page
+    // exist" checks for any tool that reads status codes.
+    if (isKnownRoute(url.pathname)) return indexResponse;
+    return new Response(indexResponse.body, { status: 404, headers: indexResponse.headers });
   },
 };
