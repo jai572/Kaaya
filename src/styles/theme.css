@@ -1,12 +1,14 @@
-/* Placeholder brand palette — swap for real Kaaya brand guidelines when available. */
+/* Real Kaaya brand palette, taken from the official leaflet (navy + sky blue). */
 :root {
-  --kaaya-bg: #faf7f5;
+  --kaaya-bg: #fbfdfe;
   --kaaya-surface: #ffffff;
-  --kaaya-text: #2b2422;
-  --kaaya-text-muted: #766a66;
-  --kaaya-accent: #a9746e;
-  --kaaya-accent-dark: #8a5b56;
-  --kaaya-border: #e8ddd8;
+  --kaaya-text: #16262f;
+  --kaaya-text-muted: #5b7180;
+  --kaaya-accent: #054a76;
+  --kaaya-accent-dark: #033a5c;
+  --kaaya-sky: #64c4ea;
+  --kaaya-sky-tint: #eaf6fc;
+  --kaaya-border: #d9e8f0;
   --kaaya-high: #b3261e;
   --kaaya-high-bg: #fbeceb;
   --kaaya-medium: #9a6a00;
@@ -15,6 +17,25 @@
   --kaaya-info-bg: #eaf2f4;
   --kaaya-radius: 14px;
   --kaaya-max-width: 560px;
+
+  /* Marketing-site tokens (shared scale, layered on the same palette above). */
+  --site-max-width: 1240px;
+  --site-max-width-narrow: 760px;
+  --site-header-h: 76px;
+  --site-space-1: 4px;
+  --site-space-2: 8px;
+  --site-space-3: 16px;
+  --site-space-4: 24px;
+  --site-space-5: 32px;
+  --site-space-6: 48px;
+  --site-space-7: 64px;
+  --site-space-8: 96px;
+  --site-radius-sm: 8px;
+  --site-radius-md: 14px;
+  --site-radius-lg: 24px;
+  --site-shadow-sm: 0 1px 3px rgba(5, 30, 48, 0.06);
+  --site-shadow-md: 0 8px 28px rgba(5, 30, 48, 0.1);
+  --site-font-display: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
 }
 
 * {
