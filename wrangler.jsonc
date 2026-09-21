@@ -10,6 +10,11 @@
   },
   "vars": {
     "SUPABASE_URL": "https://yfsoxbcqmyzddqtqiuzj.supabase.co",
-    "SUPABASE_ANON_KEY": "sb_publishable_IP4YtYFLbFAg6d24_GzPcw_NHXlfGsl"
+    "SUPABASE_ANON_KEY": "sb_publishable_IP4YtYFLbFAg6d24_GzPcw_NHXlfGsl",
+    // Location id + environment mode aren't secret (the id is already public
+    // in Kaaya's Square-hosted booking URL) — the access token is the only
+    // Square credential that's a genuine secret; see deploy.yml.
+    "SQUARE_LOCATION_ID": "LK1J1Y6MJ37S9",
+    "SQUARE_ENVIRONMENT": "sandbox"
   }
 }

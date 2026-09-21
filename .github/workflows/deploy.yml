@@ -15,6 +15,7 @@ jobs:
       # secrets can't be referenced directly in step `if:` conditions, so
       # resolve it to a plain env var first.
       HAS_SERVICE_ROLE_SECRET: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
+      HAS_SQUARE_SECRET: ${{ secrets.SQUARE_ACCESS_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,11 +35,27 @@ jobs:
           VITE_SUPABASE_URL: https://yfsoxbcqmyzddqtqiuzj.supabase.co
           VITE_SUPABASE_ANON_KEY: sb_publishable_IP4YtYFLbFAg6d24_GzPcw_NHXlfGsl
 
-      # Deploy always proceeds even if the service-role secret isn't set yet —
-      # the site itself should stay reachable; only /api/* calls that need
-      # Supabase admin access will fail until SUPABASE_SERVICE_ROLE_KEY exists.
-      - name: Deploy (with service-role secret)
-        if: ${{ env.HAS_SERVICE_ROLE_SECRET == 'true' }}
+      # Deploy always proceeds even if a secret isn't set yet — the site
+      # itself should stay reachable; only the /api/* calls that need that
+      # secret will fail until it exists. Each optional secret is only ever
+      # included in the `secrets:` list when its GitHub secret is actually
+      # set, so we never call `wrangler secret put` with an empty value —
+      # hence one explicit step per combination rather than one clever step.
+      - name: Deploy (service-role + square secrets)
+        if: ${{ env.HAS_SERVICE_ROLE_SECRET == 'true' && env.HAS_SQUARE_SECRET == 'true' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          secrets: |
+            SUPABASE_SERVICE_ROLE_KEY
+            SQUARE_ACCESS_TOKEN
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SQUARE_ACCESS_TOKEN: ${{ secrets.SQUARE_ACCESS_TOKEN }}
+
+      - name: Deploy (service-role secret only)
+        if: ${{ env.HAS_SERVICE_ROLE_SECRET == 'true' && env.HAS_SQUARE_SECRET == 'false' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -48,8 +65,19 @@ jobs:
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
-      - name: Deploy (service-role secret not yet configured)
-        if: ${{ env.HAS_SERVICE_ROLE_SECRET == 'false' }}
+      - name: Deploy (square secret only)
+        if: ${{ env.HAS_SERVICE_ROLE_SECRET == 'false' && env.HAS_SQUARE_SECRET == 'true' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          secrets: |
+            SQUARE_ACCESS_TOKEN
+        env:
+          SQUARE_ACCESS_TOKEN: ${{ secrets.SQUARE_ACCESS_TOKEN }}
+
+      - name: Deploy (no optional secrets configured)
+        if: ${{ env.HAS_SERVICE_ROLE_SECRET == 'false' && env.HAS_SQUARE_SECRET == 'false' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

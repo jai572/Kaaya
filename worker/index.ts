@@ -3,6 +3,7 @@ import { errorResponse } from "./lib/http";
 import { listTreatments } from "./routes/treatments";
 import { submitConsultation, getClientConsultation, finalizeConsultation } from "./routes/consultations";
 import { listStaffConsultations, getStaffConsultation, recordStaffReview } from "./routes/staff";
+import { listBookableServices } from "./routes/booking";
 import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, path: string): Promise<Response> {
@@ -24,6 +25,10 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
   const finalizeMatch = path.match(/^\/api\/consultations\/([^/]+)\/finalize$/);
   if (finalizeMatch && method === "POST") {
     return finalizeConsultation(request, env, finalizeMatch[1]);
+  }
+
+  if (path === "/api/booking/services" && method === "GET") {
+    return listBookableServices(env);
   }
 
   if (path === "/api/staff/consultations" && method === "GET") {

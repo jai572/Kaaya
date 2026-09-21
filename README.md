@@ -16,8 +16,10 @@ screening rule engine, `worker/` for the API, `src/pages/consultation` and
 - **Screening**: automated, data-driven (`treatment_rules` table +
   `shared/ruleEngine.ts`). Never makes a clinical call — every flag says
   "staff review required" and final suitability stays a staff decision.
-- **Square**: intentionally not integrated. `appointments` table has
-  `square_*` columns reserved for later, unused for now.
+- **Square**: source of truth for services, prices, durations, availability,
+  team members, customers and bookings. Kaaya stays the source of truth for
+  consultation/screening/consent. See `worker/lib/square.ts` for the API
+  client and `src/pages/booking` for the booking wizard.
 
 ## Infra status
 
@@ -43,6 +45,15 @@ Three tiers:
    the Worker on every deploy via `wrangler secret put` (see workflow).
 3. **Cloudflare deploy credentials** (`CLOUDFLARE_API_TOKEN`,
    `CLOUDFLARE_ACCOUNT_ID`) — GitHub Actions secrets, CI-only.
+
+Square follows the same first two tiers: `SQUARE_LOCATION_ID` and
+`SQUARE_ENVIRONMENT` are public, in `wrangler.jsonc` `vars` (the location id
+is already public in Kaaya's Square-hosted booking URL). `SQUARE_ACCESS_TOKEN`
+is private, set via GitHub Actions secret `SQUARE_ACCESS_TOKEN`, pushed to
+the Worker on deploy the same way as `SUPABASE_SERVICE_ROLE_KEY`. A local-only
+`SQUARE_MOCK_MODE=true` in `.dev.vars` (gitignored) swaps in a fixture-backed
+Square client so the booking flow can be built/tested without real
+credentials — see `worker/lib/square.fixtures.ts`.
 
 ## Known gaps / owner review needed
 
