@@ -49,6 +49,9 @@ export default function StaffConsultationList() {
       <div className="kaaya-header">
         <h1>Kaaya — Consultations</h1>
       </div>
+      <p>
+        <Link to="/staff/service-mappings">Manage Square service mappings →</Link>
+      </p>
       {error && <p className="kaaya-error">{error}</p>}
       {rows && (
         <div className="kaaya-card">

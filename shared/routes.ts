@@ -12,12 +12,14 @@ export const KNOWN_EXACT_ROUTES = [
   "/consultation",
   "/staff/login",
   "/staff",
+  "/staff/service-mappings",
 ] as const;
 
 export const KNOWN_ROUTE_PATTERNS: RegExp[] = [
   /^\/consultation\/[^/]+\/submitted$/,
   /^\/c\/[^/]+$/,
   /^\/staff\/consultations\/[^/]+$/,
+  /^\/book\/[^/]+\/confirmed$/,
 ];
 
 export function isKnownRoute(pathname: string): boolean {

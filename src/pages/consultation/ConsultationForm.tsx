@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   PERSONAL_PROFILE_QUESTIONS,
   MEDICAL_ASSESSMENT_QUESTIONS,
   PATCH_TEST_QUESTIONS,
 } from "@shared/questions";
 import type { AnswerInput, ClientDecision } from "@shared/types";
-import { getTreatments, submitConsultation, finalizeConsultation, type ClientFlag } from "../../lib/api";
+import {
+  getTreatments,
+  submitConsultation,
+  finalizeConsultation,
+  linkAppointmentToConsultation,
+  type ClientFlag,
+} from "../../lib/api";
 import SignaturePad from "../../components/SignaturePad";
 
 type Treatment = {
@@ -41,8 +47,15 @@ function groupFlagsByTreatment(flags: ClientFlag[], treatments: Treatment[]) {
 
 export default function ConsultationForm() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [stepIndex, setStepIndex] = useState(0);
   const step: Step = STEPS[stepIndex];
+
+  // Arrives from the booking confirmation page (workflow steps 14-15) —
+  // pre-fills the profile step (still editable) and lets the consultation
+  // be associated with the correct Square appointment once submitted.
+  const appointmentId = searchParams.get("appointment_id");
+  const squareBookingId = searchParams.get("square_booking_id");
 
   const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [treatmentsLoading, setTreatmentsLoading] = useState(true);
@@ -74,6 +87,25 @@ export default function ConsultationForm() {
       .then((res) => setTreatments(res.treatments))
       .catch(() => setTreatmentsError("Could not load the treatment list."))
       .finally(() => setTreatmentsLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const prefill: Record<string, string> = {
+      first_name: searchParams.get("first_name") ?? "",
+      last_name: searchParams.get("last_name") ?? "",
+      email: searchParams.get("email") ?? "",
+      phone: searchParams.get("phone") ?? "",
+    };
+    if (!Object.values(prefill).some((v) => v.length > 0)) return;
+    setAnswers((prev) => {
+      const next = { ...prev };
+      for (const [key, value] of Object.entries(prefill)) {
+        if (value) next[key] = { value };
+      }
+      return next;
+    });
+    // Only ever runs from the initial query params, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function retryLoadTreatments() {
@@ -177,6 +209,14 @@ export default function ConsultationForm() {
       setFlags(result.flags);
       setSelectedTreatmentRecords(result.treatments);
       setStepIndex(STEPS.indexOf("review_flags"));
+
+      // Non-blocking: a failure here is logged but never blocks the
+      // consultation flow itself — worst case, staff reconcile manually.
+      if (appointmentId && squareBookingId) {
+        linkAppointmentToConsultation(appointmentId, result.consultation_id, squareBookingId).catch((linkError) =>
+          console.error("Could not link appointment to consultation", linkError)
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
     } finally {

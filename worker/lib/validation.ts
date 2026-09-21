@@ -9,14 +9,18 @@ export const answerInputSchema = z.object({
   additional_info: z.string().max(2000).nullable().optional(),
 });
 
+// Shared between the consultation form and the booking flow so a client's
+// contact details validate identically in both places.
+export const contactDetailsSchema = z.object({
+  first_name: z.string().trim().min(1),
+  last_name: z.string().trim().min(1),
+  email: z.string().trim().email(),
+  phone: z.string().trim().min(5),
+  address: z.string().trim().optional(),
+});
+
 export const consultationSubmissionSchema = z.object({
-  client: z.object({
-    first_name: z.string().trim().min(1),
-    last_name: z.string().trim().min(1),
-    email: z.string().trim().email(),
-    phone: z.string().trim().min(5),
-    address: z.string().trim().optional(),
-  }),
+  client: contactDetailsSchema,
   answers: z.array(answerInputSchema),
   treatment_ids: z.array(z.string().uuid()).min(1, "Select at least one treatment"),
 });

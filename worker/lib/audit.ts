@@ -3,7 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export async function recordAuditEvent(
   admin: SupabaseClient,
   params: {
-    consultation_id: string | null;
+    consultation_id?: string | null;
+    appointment_id?: string | null;
     actor_id: string | null;
     actor_type: "client" | "staff" | "system";
     event_type: string;
@@ -11,7 +12,8 @@ export async function recordAuditEvent(
   }
 ): Promise<void> {
   const { error } = await admin.from("audit_log").insert({
-    consultation_id: params.consultation_id,
+    consultation_id: params.consultation_id ?? null,
+    appointment_id: params.appointment_id ?? null,
     actor_id: params.actor_id,
     actor_type: params.actor_type,
     event_type: params.event_type,

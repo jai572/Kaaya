@@ -37,3 +37,10 @@ export async function requireStaff(request: Request, env: Env): Promise<StaffCon
 
   return { id: profile.id, full_name: profile.full_name, role: profile.role };
 }
+
+/** Throws if the staff member's role isn't one of `allowed`. Used for surfaces
+ * where a mistake has clinical consequences (e.g. Square service mapping),
+ * not just general staff access. */
+export function requireRole(staff: StaffContext, allowed: StaffContext["role"][]): void {
+  if (!allowed.includes(staff.role)) throw new AuthError("Insufficient role", 403);
+}

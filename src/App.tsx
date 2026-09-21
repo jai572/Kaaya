@@ -5,18 +5,20 @@ import Treatments from "./pages/site/Treatments";
 import About from "./pages/site/About";
 import GalleryPage from "./pages/site/GalleryPage";
 import Contact from "./pages/site/Contact";
-import Book from "./pages/site/Book";
 import NotFound from "./pages/site/NotFound";
 
-// The consultation/staff module pulls in @supabase/supabase-js and zod —
-// meaningful weight a marketing-page visitor never needs. Lazy-loading it
-// keeps that cost off the brochure site's initial bundle.
+// The consultation/staff/booking modules pull in @supabase/supabase-js and
+// zod — meaningful weight a marketing-page visitor never needs. Lazy-loading
+// them keeps that cost off the brochure site's initial bundle.
 const ConsultationForm = lazy(() => import("./pages/consultation/ConsultationForm"));
 const ConsultationSubmitted = lazy(() => import("./pages/consultation/ConsultationSubmitted"));
 const ClientConsultationView = lazy(() => import("./pages/consultation/ClientConsultationView"));
 const StaffLogin = lazy(() => import("./pages/staff/StaffLogin"));
 const StaffConsultationList = lazy(() => import("./pages/staff/StaffConsultationList"));
 const StaffConsultationDetail = lazy(() => import("./pages/staff/StaffConsultationDetail"));
+const StaffServiceMappings = lazy(() => import("./pages/staff/StaffServiceMappings"));
+const BookingForm = lazy(() => import("./pages/booking/BookingForm"));
+const BookingConfirmed = lazy(() => import("./pages/booking/BookingConfirmed"));
 
 export default function App() {
   return (
@@ -27,7 +29,8 @@ export default function App() {
         <Route path="/about" element={<About />} />
         <Route path="/gallery" element={<GalleryPage />} />
         <Route path="/contact" element={<Contact />} />
-        <Route path="/book" element={<Book />} />
+        <Route path="/book" element={<BookingForm />} />
+        <Route path="/book/:appointmentId/confirmed" element={<BookingConfirmed />} />
 
         <Route path="/consultation" element={<ConsultationForm />} />
         <Route path="/consultation/:id/submitted" element={<ConsultationSubmitted />} />
@@ -36,6 +39,7 @@ export default function App() {
         <Route path="/staff/login" element={<StaffLogin />} />
         <Route path="/staff" element={<StaffConsultationList />} />
         <Route path="/staff/consultations/:id" element={<StaffConsultationDetail />} />
+        <Route path="/staff/service-mappings" element={<StaffServiceMappings />} />
 
         <Route path="*" element={<NotFound />} />
       </Routes>

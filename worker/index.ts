@@ -3,11 +3,20 @@ import { errorResponse } from "./lib/http";
 import { listTreatments } from "./routes/treatments";
 import { submitConsultation, getClientConsultation, finalizeConsultation } from "./routes/consultations";
 import { listStaffConsultations, getStaffConsultation, recordStaffReview } from "./routes/staff";
-import { listBookableServices } from "./routes/booking";
+import {
+  listBookableServices,
+  listTeamMembersRoute,
+  getAvailability,
+  lookupOrCreateCustomer,
+  createAppointment,
+  linkAppointmentToConsultation,
+} from "./routes/booking";
+import { listServicesForMapping, createServiceMapping, updateServiceMapping } from "./routes/staffBooking";
 import { isKnownRoute } from "../shared/routes";
 
-async function handleApi(request: Request, env: Env, path: string): Promise<Response> {
+async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
   const method = request.method;
+  const path = url.pathname;
 
   if (path === "/api/treatments" && method === "GET") {
     return listTreatments(env);
@@ -31,6 +40,27 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
     return listBookableServices(env);
   }
 
+  if (path === "/api/booking/team-members" && method === "GET") {
+    return listTeamMembersRoute(env, url);
+  }
+
+  if (path === "/api/booking/availability" && method === "GET") {
+    return getAvailability(env, url);
+  }
+
+  if (path === "/api/booking/customers" && method === "POST") {
+    return lookupOrCreateCustomer(request, env);
+  }
+
+  if (path === "/api/booking/appointments" && method === "POST") {
+    return createAppointment(request, env);
+  }
+
+  const linkConsultationMatch = path.match(/^\/api\/booking\/appointments\/([^/]+)\/consultation$/);
+  if (linkConsultationMatch && method === "PATCH") {
+    return linkAppointmentToConsultation(request, env, linkConsultationMatch[1]);
+  }
+
   if (path === "/api/staff/consultations" && method === "GET") {
     return listStaffConsultations(request, env);
   }
@@ -45,6 +75,19 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
     return recordStaffReview(request, env, staffReviewMatch[1]);
   }
 
+  if (path === "/api/staff/booking/services" && method === "GET") {
+    return listServicesForMapping(request, env);
+  }
+
+  if (path === "/api/staff/booking/mappings" && method === "POST") {
+    return createServiceMapping(request, env);
+  }
+
+  const mappingMatch = path.match(/^\/api\/staff\/booking\/mappings\/([^/]+)$/);
+  if (mappingMatch && method === "PATCH") {
+    return updateServiceMapping(request, env, mappingMatch[1]);
+  }
+
   return errorResponse("Not found", 404);
 }
 
@@ -54,7 +97,7 @@ export default {
 
     if (url.pathname.startsWith("/api/")) {
       try {
-        return await handleApi(request, env, url.pathname);
+        return await handleApi(request, env, url);
       } catch (err) {
         console.error("Unhandled API error", err);
         return errorResponse("Internal server error", 500);
