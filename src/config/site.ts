@@ -25,10 +25,8 @@ export const CONTACT = {
 };
 
 // BOOKING_URL is the single place this gets wired up; every CTA reads from
-// here rather than hard-coding a URL. Currently Kaaya's Instagram (bookings
-// are handled there); swapping in a dedicated booking engine later is a
-// one-line change in this file.
-export const BOOKING_URL: string | null = INSTAGRAM_URL;
+// here rather than hard-coding a URL. Kaaya's Square booking page.
+export const BOOKING_URL: string | null = "https://squareup.com/appointments/book/X6TRE72EGFTK7/start";
 
 // Hides every "Complete Consultation" link/button site-wide without
 // touching the route or the consultation flow itself - /consultation still
