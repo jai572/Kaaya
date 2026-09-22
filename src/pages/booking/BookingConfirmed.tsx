@@ -4,7 +4,7 @@ import { formatMoney } from "../../lib/bookingFormat";
 
 interface ConfirmedState {
   appointmentId: string;
-  squareBookingId: string;
+  bookingReference: string;
   clientId: string;
   contact: BookingContact;
   summary: AppointmentSummary;
@@ -31,14 +31,13 @@ export default function BookingConfirmed() {
     );
   }
 
-  const { summary, contact, appointmentId, squareBookingId } = state;
+  const { summary, contact, appointmentId, bookingReference } = state;
 
   // Durable across refresh/sharing (unlike router state), and lets the
-  // consultation form associate itself with the correct appointment —
-  // workflow steps 14-15.
+  // consultation form associate itself with the correct appointment.
   const consultationParams = new URLSearchParams({
     appointment_id: appointmentId,
-    square_booking_id: squareBookingId,
+    booking_reference: bookingReference,
     first_name: contact.first_name,
     last_name: contact.last_name,
     email: contact.email,
@@ -58,9 +57,7 @@ export default function BookingConfirmed() {
           <tbody>
             <tr>
               <th>Treatment</th>
-              <td>
-                {summary.service_name} — {summary.variation_name}
-              </td>
+              <td>{summary.service_name}</td>
             </tr>
             <tr>
               <th>Date &amp; time</th>

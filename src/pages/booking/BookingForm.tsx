@@ -3,14 +3,14 @@ import { useNavigate } from "react-router-dom";
 import {
   getBookableServices,
   getAvailability,
-  getBookingTeamMembers,
+  getBookingStaff,
   lookupOrCreateBookingCustomer,
   createBookingAppointment,
   type BookableService,
-  type TeamMember,
+  type StaffMember,
   type AvailabilitySlot,
 } from "../../lib/api";
-import { formatMoney, formatDuration, todayIso, filterSlotsByTeamMember } from "../../lib/bookingFormat";
+import { formatMoney, formatDuration, todayIso, filterSlotsByStaffMember } from "../../lib/bookingFormat";
 
 const STEPS = ["service", "date", "time", "contact", "summary"] as const;
 type Step = (typeof STEPS)[number];
@@ -23,15 +23,15 @@ export default function BookingForm() {
   const [services, setServices] = useState<BookableService[]>([]);
   const [servicesLoading, setServicesLoading] = useState(true);
   const [servicesError, setServicesError] = useState<string | null>(null);
-  const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
 
   const [date, setDate] = useState(todayIso());
 
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
-  const [selectedTeamMemberId, setSelectedTeamMemberId] = useState<string | null>(null); // null = any
+  const [selectedStaffMemberId, setSelectedStaffMemberId] = useState<string | null>(null); // null = any
   const [selectedSlot, setSelectedSlot] = useState<AvailabilitySlot | null>(null);
 
   const [contact, setContact] = useState({ first_name: "", last_name: "", email: "", phone: "" });
@@ -46,32 +46,33 @@ export default function BookingForm() {
       .finally(() => setServicesLoading(false));
   }, []);
 
-  const selectedService = services.find((s) => s.squareVariationId === selectedVariationId) ?? null;
+  const selectedService = services.find((s) => s.id === selectedServiceId) ?? null;
+  const bookableOnline = !!selectedService?.duration_minutes;
 
   useEffect(() => {
-    if (!selectedVariationId) return;
-    getBookingTeamMembers(selectedVariationId)
-      .then((res) => setTeamMembers(res.teamMembers))
-      .catch(() => setTeamMembers([]));
-  }, [selectedVariationId]);
+    if (!selectedServiceId) return;
+    getBookingStaff(selectedServiceId)
+      .then((res) => setStaffMembers(res.staff))
+      .catch(() => setStaffMembers([]));
+  }, [selectedServiceId]);
 
-  // Availability is always fetched for "any available therapist" — picking a
-  // specific one just filters these same slots client-side, no extra round
-  // trip, since each slot Square returns already names a concrete therapist.
+  // Availability is always fetched for "any available staff member" — picking
+  // a specific one just filters these same slots client-side, no extra round
+  // trip, since each slot already names a concrete staff member.
   useEffect(() => {
-    if (step !== "time" || !selectedVariationId) return;
+    if (step !== "time" || !selectedServiceId || !bookableOnline) return;
     setSlotsLoading(true);
     setSlotsError(null);
     setSelectedSlot(null);
-    getAvailability(selectedVariationId, date)
+    getAvailability(selectedServiceId, date)
       .then((res) => setSlots(res.slots))
       .catch(() => setSlotsError("Could not load availability. Please try a different date."))
       .finally(() => setSlotsLoading(false));
-  }, [step, selectedVariationId, date]);
+  }, [step, selectedServiceId, date, bookableOnline]);
 
-  const visibleSlots = filterSlotsByTeamMember(slots, selectedTeamMemberId);
-  const slotTeamMemberIds = useMemo(() => new Set(slots.map((s) => s.teamMemberId)), [slots]);
-  const availableTeamMembers = teamMembers.filter((m) => slotTeamMemberIds.has(m.id));
+  const visibleSlots = filterSlotsByStaffMember(slots, selectedStaffMemberId);
+  const slotStaffMemberIds = useMemo(() => new Set(slots.map((s) => s.staffMemberId)), [slots]);
+  const availableStaffMembers = staffMembers.filter((m) => slotStaffMemberIds.has(m.id));
 
   const contactComplete =
     contact.first_name.trim().length > 0 &&
@@ -82,11 +83,11 @@ export default function BookingForm() {
   const canAdvance = (() => {
     switch (step) {
       case "service":
-        return !!selectedVariationId;
+        return !!selectedServiceId;
       case "date":
-        return !!date;
+        return bookableOnline && !!date;
       case "time":
-        return !!selectedSlot;
+        return bookableOnline && !!selectedSlot;
       case "contact":
         return contactComplete;
       case "summary":
@@ -99,24 +100,16 @@ export default function BookingForm() {
     setSubmitting(true);
     setError(null);
     try {
-      const { client_id, square_customer_id } = await lookupOrCreateBookingCustomer(contact);
-      const { appointment_id, square_booking_id, summary } = await createBookingAppointment({
+      const { client_id } = await lookupOrCreateBookingCustomer(contact);
+      const { appointment_id, booking_reference, summary } = await createBookingAppointment({
         client_id,
-        square_customer_id,
-        square_service_id: selectedService.squareItemId,
-        square_service_variation_id: selectedService.squareVariationId,
-        team_member_id: selectedSlot.teamMemberId,
+        service_id: selectedService.id,
+        staff_member_id: selectedSlot.staffMemberId,
         start_at: selectedSlot.startAt,
       });
 
       navigate(`/book/${appointment_id}/confirmed`, {
-        state: {
-          appointmentId: appointment_id,
-          squareBookingId: square_booking_id,
-          clientId: client_id,
-          contact,
-          summary,
-        },
+        state: { appointmentId: appointment_id, bookingReference: booking_reference, clientId: client_id, contact, summary },
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
@@ -171,24 +164,25 @@ export default function BookingForm() {
           {servicesLoading && <p>Loading treatments…</p>}
           {servicesError && <p className="kaaya-error">{servicesError}</p>}
           {!servicesLoading && !servicesError && services.length === 0 && (
-            <p>No bookable treatments are available online right now — please call to book.</p>
+            <p>No treatments are available online right now — please call to book.</p>
           )}
           {!servicesLoading &&
             !servicesError &&
             services.map((s) => (
               <div
-                key={s.squareVariationId}
+                key={s.id}
                 className="kaaya-treatment-option"
-                data-selected={selectedVariationId === s.squareVariationId}
-                onClick={() => setSelectedVariationId(s.squareVariationId)}
+                data-selected={selectedServiceId === s.id}
+                onClick={() => setSelectedServiceId(s.id)}
               >
-                <input type="radio" checked={selectedVariationId === s.squareVariationId} readOnly />
+                <input type="radio" checked={selectedServiceId === s.id} readOnly />
                 <span>
-                  {s.serviceName} — {s.variationName}
+                  {s.name}
                   <br />
                   <small style={{ color: "var(--kaaya-text-muted)" }}>
-                    {formatMoney(s.priceAmount, s.priceCurrency)}
-                    {s.durationMinutes ? ` · ${formatDuration(s.durationMinutes)}` : ""}
+                    {s.price_is_from ? "from " : ""}
+                    {formatMoney(s.price_amount, s.price_currency)}
+                    {s.duration_minutes ? ` · ${formatDuration(s.duration_minutes)}` : " · call to book"}
                   </small>
                 </span>
               </div>
@@ -198,34 +192,41 @@ export default function BookingForm() {
 
       {step === "date" && (
         <div className="kaaya-card">
-          <div className="kaaya-field">
-            <label htmlFor="booking-date">Choose a date</label>
-            <input id="booking-date" type="date" min={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
+          {!bookableOnline ? (
+            <p>
+              This treatment isn't available for online time-slot booking yet — please call or WhatsApp to book it
+              directly.
+            </p>
+          ) : (
+            <div className="kaaya-field">
+              <label htmlFor="booking-date">Choose a date</label>
+              <input id="booking-date" type="date" min={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+          )}
         </div>
       )}
 
-      {step === "time" && (
+      {step === "time" && bookableOnline && (
         <div className="kaaya-card">
-          {teamMembers.length > 1 && (
+          {staffMembers.length > 1 && (
             <div className="kaaya-field">
-              <label>Therapist</label>
+              <label>Staff member</label>
               <div className="kaaya-yesno">
                 <button
                   type="button"
-                  aria-pressed={selectedTeamMemberId === null}
-                  onClick={() => setSelectedTeamMemberId(null)}
+                  aria-pressed={selectedStaffMemberId === null}
+                  onClick={() => setSelectedStaffMemberId(null)}
                 >
                   Any available
                 </button>
-                {availableTeamMembers.map((m) => (
+                {availableStaffMembers.map((m) => (
                   <button
                     key={m.id}
                     type="button"
-                    aria-pressed={selectedTeamMemberId === m.id}
-                    onClick={() => setSelectedTeamMemberId(m.id)}
+                    aria-pressed={selectedStaffMemberId === m.id}
+                    onClick={() => setSelectedStaffMemberId(m.id)}
                   >
-                    {m.displayName}
+                    {m.display_name}
                   </button>
                 ))}
               </div>
@@ -240,20 +241,17 @@ export default function BookingForm() {
           {!slotsLoading &&
             !slotsError &&
             visibleSlots.map((slot) => {
-              const member = teamMembers.find((m) => m.id === slot.teamMemberId);
               const time = new Date(slot.startAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
               return (
                 <div
-                  key={`${slot.teamMemberId}-${slot.startAt}`}
+                  key={`${slot.staffMemberId}-${slot.startAt}`}
                   className="kaaya-list-row"
                   data-selected={selectedSlot === slot}
                   onClick={() => setSelectedSlot(slot)}
                   style={{ cursor: "pointer" }}
                 >
                   <strong>{time}</strong>
-                  {member && (
-                    <span style={{ marginLeft: 8, color: "var(--kaaya-text-muted)" }}>{member.displayName}</span>
-                  )}
+                  <span style={{ marginLeft: 8, color: "var(--kaaya-text-muted)" }}>{slot.staffMemberName}</span>
                 </div>
               );
             })}
@@ -308,9 +306,7 @@ export default function BookingForm() {
             <tbody>
               <tr>
                 <th>Treatment</th>
-                <td>
-                  {selectedService.serviceName} — {selectedService.variationName}
-                </td>
+                <td>{selectedService.name}</td>
               </tr>
               <tr>
                 <th>Date &amp; time</th>
@@ -325,16 +321,19 @@ export default function BookingForm() {
                 </td>
               </tr>
               <tr>
-                <th>Therapist</th>
-                <td>{teamMembers.find((m) => m.id === selectedSlot.teamMemberId)?.displayName ?? "Assigned by Kaaya"}</td>
+                <th>Staff member</th>
+                <td>{selectedSlot.staffMemberName}</td>
               </tr>
               <tr>
                 <th>Duration</th>
-                <td>{formatDuration(selectedService.durationMinutes)}</td>
+                <td>{formatDuration(selectedService.duration_minutes)}</td>
               </tr>
               <tr>
                 <th>Price</th>
-                <td>{formatMoney(selectedService.priceAmount, selectedService.priceCurrency)}</td>
+                <td>
+                  {selectedService.price_is_from ? "from " : ""}
+                  {formatMoney(selectedService.price_amount, selectedService.price_currency)}
+                </td>
               </tr>
             </tbody>
           </table>

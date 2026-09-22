@@ -89,48 +89,44 @@ export async function staffRecordReview(id: string, decision: string, confirmed:
   });
 }
 
-// Booking flow — Square is the source of truth for all of this; nothing
-// here is hard-coded, it's whatever the Worker's Square API calls return.
+// Booking flow — Kaaya (Supabase) is the source of truth for all of this now.
 export interface BookableService {
-  squareItemId: string;
-  squareVariationId: string;
-  serviceName: string;
-  variationName: string;
-  priceAmount: number | null;
-  priceCurrency: string | null;
-  durationMinutes: number | null;
-  version: number;
-  teamMemberIds: string[];
-  mapping: { treatment_id: string } | null;
+  id: string;
+  name: string;
+  category_slug: string;
+  treatment_id: string | null;
+  tint_product_type: "hair_dye" | "other" | null;
+  eyelash_safe: boolean | null;
+  price_amount: number;
+  price_currency: string;
+  price_is_from: boolean;
+  duration_minutes: number | null;
+  display_order: number;
 }
 
-export interface TeamMember {
+export interface StaffMember {
   id: string;
-  displayName: string;
+  display_name: string;
 }
 
 export interface AvailabilitySlot {
+  staffMemberId: string;
+  staffMemberName: string;
   startAt: string;
-  locationId: string;
-  teamMemberId: string;
-  serviceVariationId: string;
-  serviceVariationVersion: number;
-  durationMinutes: number;
+  endAt: string;
 }
 
 export function getBookableServices() {
   return request("/api/booking/services") as Promise<{ services: BookableService[] }>;
 }
 
-export function getBookingTeamMembers(serviceVariationId: string) {
-  return request(`/api/booking/team-members?service_variation_id=${encodeURIComponent(serviceVariationId)}`) as Promise<{
-    teamMembers: TeamMember[];
-  }>;
+export function getBookingStaff(serviceId: string) {
+  return request(`/api/booking/staff?service_id=${encodeURIComponent(serviceId)}`) as Promise<{ staff: StaffMember[] }>;
 }
 
-export function getAvailability(serviceVariationId: string, date: string, teamMemberId?: string) {
-  const params = new URLSearchParams({ service_variation_id: serviceVariationId, date });
-  if (teamMemberId) params.set("team_member_id", teamMemberId);
+export function getAvailability(serviceId: string, date: string, staffMemberId?: string) {
+  const params = new URLSearchParams({ service_id: serviceId, date });
+  if (staffMemberId) params.set("staff_member_id", staffMemberId);
   return request(`/api/booking/availability?${params.toString()}`) as Promise<{ slots: AvailabilitySlot[] }>;
 }
 
@@ -145,38 +141,37 @@ export function lookupOrCreateBookingCustomer(contact: BookingContact) {
   return request("/api/booking/customers", {
     method: "POST",
     body: JSON.stringify({ contact }),
-  }) as Promise<{ client_id: string; square_customer_id: string }>;
+  }) as Promise<{ client_id: string }>;
 }
 
 export interface AppointmentSummary {
   service_name: string;
-  variation_name: string;
-  duration_minutes: number | null;
-  price_amount: number | null;
-  price_currency: string | null;
+  duration_minutes: number;
+  price_amount: number;
+  price_currency: string;
   start_at: string;
 }
 
 export function createBookingAppointment(input: {
   client_id: string;
-  square_customer_id: string;
-  square_service_id: string;
-  square_service_variation_id: string;
-  team_member_id: string;
+  service_id: string;
+  staff_member_id: string;
   start_at: string;
 }) {
   return request("/api/booking/appointments", {
     method: "POST",
     body: JSON.stringify(input),
-  }) as Promise<{ appointment_id: string; square_booking_id: string; summary: AppointmentSummary }>;
+  }) as Promise<{ appointment_id: string; booking_reference: string; summary: AppointmentSummary }>;
 }
 
-export function linkAppointmentToConsultation(appointmentId: string, consultationId: string, squareBookingId: string) {
+export function linkAppointmentToConsultation(appointmentId: string, consultationId: string, bookingReference: string) {
   return request(`/api/booking/appointments/${appointmentId}/consultation`, {
     method: "PATCH",
-    body: JSON.stringify({ consultation_id: consultationId, square_booking_id: squareBookingId }),
+    body: JSON.stringify({ consultation_id: consultationId, booking_reference: bookingReference }),
   }) as Promise<{ linked: true }>;
 }
+
+// ---- Staff management (services, staff members, hours, capability) ----
 
 export async function staffListBookingServices() {
   const headers = await staffAuthHeader();
@@ -193,27 +188,177 @@ export async function staffListBookingServices() {
   }>;
 }
 
-export interface ServiceMappingInput {
-  square_item_id: string;
-  square_variation_id: string;
-  treatment_id: string;
+export interface ServiceInput {
+  name: string;
+  category_slug: string;
+  treatment_id?: string | null;
   tint_product_type?: "hair_dye" | "other" | null;
   eyelash_safe?: boolean | null;
+  price_amount: number;
+  price_currency?: string;
+  price_is_from?: boolean;
+  duration_minutes?: number | null;
+  display_order?: number;
   notes?: string;
 }
 
-export async function staffCreateServiceMapping(input: ServiceMappingInput) {
+export async function staffCreateService(input: ServiceInput) {
   const headers = await staffAuthHeader();
-  return request("/api/staff/booking/mappings", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{
+  return request("/api/staff/booking/services", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{
     id: string;
   }>;
 }
 
-export async function staffUpdateServiceMapping(id: string, input: Partial<ServiceMappingInput> & { active?: boolean }) {
+export async function staffUpdateService(id: string, input: Partial<ServiceInput> & { active?: boolean }) {
   const headers = await staffAuthHeader();
-  return request(`/api/staff/booking/mappings/${id}`, {
+  return request(`/api/staff/booking/services/${id}`, {
     method: "PATCH",
     headers,
     body: JSON.stringify(input),
+  }) as Promise<{ updated: true }>;
+}
+
+export interface StaffMemberRow {
+  id: string;
+  staff_profile_id: string | null;
+  display_name: string;
+  active: boolean;
+}
+
+export async function staffListStaffMembers() {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/booking/staff-members", { headers }) as Promise<{ staffMembers: StaffMemberRow[] }>;
+}
+
+export async function staffCreateStaffMember(input: { staff_profile_id?: string | null; display_name: string }) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/booking/staff-members", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{
+    id: string;
+  }>;
+}
+
+export async function staffUpdateStaffMember(
+  id: string,
+  input: Partial<{ staff_profile_id: string | null; display_name: string; active: boolean }>
+) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/staff-members/${id}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(input),
+  }) as Promise<{ updated: true }>;
+}
+
+export interface WorkingHoursBlock {
+  day_of_week: number;
+  start_time: string | null;
+  end_time: string | null;
+}
+
+export async function staffGetStaffWorkingHours(staffMemberId: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/staff-members/${staffMemberId}/hours`, { headers }) as Promise<{
+    hours: { day_of_week: number; start_time: string; end_time: string }[];
+  }>;
+}
+
+export async function staffSetStaffWorkingHours(staffMemberId: string, blocks: WorkingHoursBlock[]) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/staff-members/${staffMemberId}/hours`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ blocks }),
+  }) as Promise<{ updated: true }>;
+}
+
+export async function staffGetServiceStaffCapabilities(serviceId: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/services/${serviceId}/staff`, { headers }) as Promise<{ staffMemberIds: string[] }>;
+}
+
+export async function staffSetServiceStaffCapabilities(serviceId: string, staffMemberIds: string[]) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/services/${serviceId}/staff`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ staff_member_ids: staffMemberIds }),
+  }) as Promise<{ updated: true }>;
+}
+
+export interface StaffAppointmentRow {
+  id: string;
+  client_id: string;
+  service_id: string;
+  staff_member_id: string;
+  service_name: string;
+  duration_minutes: number;
+  price_amount: number;
+  price_currency: string;
+  status: string;
+  scheduled_at: string;
+  end_at: string;
+}
+
+export async function staffListAppointments(date?: string) {
+  const headers = await staffAuthHeader();
+  const params = date ? `?date=${encodeURIComponent(date)}` : "";
+  return request(`/api/staff/booking/appointments${params}`, { headers }) as Promise<{
+    appointments: StaffAppointmentRow[];
+  }>;
+}
+
+export async function staffCancelAppointment(id: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/appointments/${id}/cancel`, { method: "PATCH", headers }) as Promise<{
+    cancelled: true;
+  }>;
+}
+
+export async function staffGetRevenueSummary(date?: string) {
+  const headers = await staffAuthHeader();
+  const params = date ? `?date=${encodeURIComponent(date)}` : "";
+  return request(`/api/staff/booking/revenue-summary${params}`, { headers }) as Promise<{
+    date: string;
+    total_amount: number;
+    currency: string;
+    appointment_count: number;
+  }>;
+}
+
+// ---- Owner-only: per-staff-login feature overrides ----
+
+export interface StaffProfileRow {
+  id: string;
+  full_name: string;
+  role: "staff" | "admin" | "owner";
+  active: boolean;
+}
+
+export type FeatureKey =
+  | "manage_services"
+  | "manage_staff_members"
+  | "manage_service_capability"
+  | "view_all_bookings"
+  | "manage_all_bookings"
+  | "view_revenue";
+
+export async function staffListPermissions() {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/permissions", { headers }) as Promise<{
+    staffProfiles: StaffProfileRow[];
+    overrides: { staff_profile_id: string; feature_key: FeatureKey; granted: boolean }[];
+    featureKeys: FeatureKey[];
+  }>;
+}
+
+export async function staffSetPermissions(
+  staffProfileId: string,
+  overrides: { feature_key: FeatureKey; granted: boolean | null }[]
+) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/permissions/${staffProfileId}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ overrides }),
   }) as Promise<{ updated: true }>;
 }

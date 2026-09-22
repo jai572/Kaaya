@@ -51,11 +51,11 @@ export default function ConsultationForm() {
   const [stepIndex, setStepIndex] = useState(0);
   const step: Step = STEPS[stepIndex];
 
-  // Arrives from the booking confirmation page (workflow steps 14-15) —
-  // pre-fills the profile step (still editable) and lets the consultation
-  // be associated with the correct Square appointment once submitted.
+  // Arrives from the booking confirmation page — pre-fills the profile step
+  // (still editable) and lets the consultation be associated with the
+  // correct appointment once submitted.
   const appointmentId = searchParams.get("appointment_id");
-  const squareBookingId = searchParams.get("square_booking_id");
+  const bookingReference = searchParams.get("booking_reference");
 
   const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [treatmentsLoading, setTreatmentsLoading] = useState(true);
@@ -212,8 +212,8 @@ export default function ConsultationForm() {
 
       // Non-blocking: a failure here is logged but never blocks the
       // consultation flow itself — worst case, staff reconcile manually.
-      if (appointmentId && squareBookingId) {
-        linkAppointmentToConsultation(appointmentId, result.consultation_id, squareBookingId).catch((linkError) =>
+      if (appointmentId && bookingReference) {
+        linkAppointmentToConsultation(appointmentId, result.consultation_id, bookingReference).catch((linkError) =>
           console.error("Could not link appointment to consultation", linkError)
         );
       }

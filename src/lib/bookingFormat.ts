@@ -19,11 +19,11 @@ export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-// "Any available therapist" shows every fetched slot; a specific therapist
+// "Any available staff member" shows every fetched slot; a specific one
 // filters the same already-fetched slots client-side, no extra round trip.
-export function filterSlotsByTeamMember<T extends { teamMemberId: string }>(
+export function filterSlotsByStaffMember<T extends { staffMemberId: string }>(
   slots: T[],
-  teamMemberId: string | null
+  staffMemberId: string | null
 ): T[] {
-  return teamMemberId ? slots.filter((s) => s.teamMemberId === teamMemberId) : slots;
+  return staffMemberId ? slots.filter((s) => s.staffMemberId === staffMemberId) : slots;
 }

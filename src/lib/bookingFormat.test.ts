@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatMoney, formatDuration, filterSlotsByTeamMember } from "./bookingFormat";
+import { formatMoney, formatDuration, filterSlotsByStaffMember } from "./bookingFormat";
 
 describe("formatMoney", () => {
   it("formats minor units as GBP currency", () => {
@@ -34,21 +34,21 @@ describe("formatDuration", () => {
   });
 });
 
-describe("filterSlotsByTeamMember", () => {
+describe("filterSlotsByStaffMember", () => {
   const slots = [
-    { teamMemberId: "a", startAt: "10:00" },
-    { teamMemberId: "b", startAt: "11:00" },
+    { staffMemberId: "a", startAt: "10:00" },
+    { staffMemberId: "b", startAt: "11:00" },
   ];
 
-  it("returns all slots when teamMemberId is null (any available)", () => {
-    expect(filterSlotsByTeamMember(slots, null)).toEqual(slots);
+  it("returns all slots when staffMemberId is null (any available)", () => {
+    expect(filterSlotsByStaffMember(slots, null)).toEqual(slots);
   });
 
-  it("filters to only the matching team member's slots", () => {
-    expect(filterSlotsByTeamMember(slots, "a")).toEqual([slots[0]]);
+  it("filters to only the matching staff member's slots", () => {
+    expect(filterSlotsByStaffMember(slots, "a")).toEqual([slots[0]]);
   });
 
   it("returns an empty array when nothing matches", () => {
-    expect(filterSlotsByTeamMember(slots, "nonexistent")).toEqual([]);
+    expect(filterSlotsByStaffMember(slots, "nonexistent")).toEqual([]);
   });
 });

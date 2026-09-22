@@ -16,7 +16,10 @@ const ClientConsultationView = lazy(() => import("./pages/consultation/ClientCon
 const StaffLogin = lazy(() => import("./pages/staff/StaffLogin"));
 const StaffConsultationList = lazy(() => import("./pages/staff/StaffConsultationList"));
 const StaffConsultationDetail = lazy(() => import("./pages/staff/StaffConsultationDetail"));
-const StaffServiceMappings = lazy(() => import("./pages/staff/StaffServiceMappings"));
+const StaffServices = lazy(() => import("./pages/staff/StaffServices"));
+const StaffMembers = lazy(() => import("./pages/staff/StaffMembers"));
+const StaffBookings = lazy(() => import("./pages/staff/StaffBookings"));
+const StaffPermissions = lazy(() => import("./pages/staff/StaffPermissions"));
 const BookingForm = lazy(() => import("./pages/booking/BookingForm"));
 const BookingConfirmed = lazy(() => import("./pages/booking/BookingConfirmed"));
 
@@ -39,7 +42,10 @@ export default function App() {
         <Route path="/staff/login" element={<StaffLogin />} />
         <Route path="/staff" element={<StaffConsultationList />} />
         <Route path="/staff/consultations/:id" element={<StaffConsultationDetail />} />
-        <Route path="/staff/service-mappings" element={<StaffServiceMappings />} />
+        <Route path="/staff/services" element={<StaffServices />} />
+        <Route path="/staff/staff-members" element={<StaffMembers />} />
+        <Route path="/staff/bookings" element={<StaffBookings />} />
+        <Route path="/staff/permissions" element={<StaffPermissions />} />
 
         <Route path="*" element={<NotFound />} />
       </Routes>

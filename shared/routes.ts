@@ -12,7 +12,10 @@ export const KNOWN_EXACT_ROUTES = [
   "/consultation",
   "/staff/login",
   "/staff",
-  "/staff/service-mappings",
+  "/staff/services",
+  "/staff/staff-members",
+  "/staff/bookings",
+  "/staff/permissions",
 ] as const;
 
 export const KNOWN_ROUTE_PATTERNS: RegExp[] = [

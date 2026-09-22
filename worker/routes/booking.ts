@@ -1,79 +1,128 @@
 import type { Env } from "../env";
 import { json, errorResponse } from "../lib/http";
-import { getSquareClient, SquareApiError } from "../lib/square";
 import { adminClient } from "../lib/supabase";
 import { recordAuditEvent } from "../lib/audit";
+import { toDayOfWeek, computeAvailableSlots } from "../lib/availability";
 import {
   availabilityQuerySchema,
   lookupOrCreateCustomerSchema,
   createAppointmentSchema,
   linkAppointmentToConsultationSchema,
 } from "../lib/bookingValidation";
-import { attachServiceMappings, buildServiceNameSnapshot } from "../lib/bookingLogic";
 
-// Square is the live source of truth here — this only decorates Square's
-// own bookable services with whichever Kaaya screening treatment (if any)
-// staff have mapped them to via /staff/service-mappings. Never caches price
-// or duration as authoritative beyond Square's own live response.
+// Kaaya is the source of truth for all of this now — services, staff,
+// availability and bookings all live directly in Supabase.
 export async function listBookableServices(env: Env): Promise<Response> {
-  try {
-    const square = getSquareClient(env);
-    const variations = await square.listBookableServices();
+  const admin = adminClient(env);
+  const { data, error } = await admin
+    .from("services")
+    .select(
+      "id, name, category_slug, treatment_id, tint_product_type, eyelash_safe, price_amount, price_currency, price_is_from, duration_minutes, display_order"
+    )
+    .eq("active", true)
+    .order("category_slug", { ascending: true })
+    .order("display_order", { ascending: true });
 
-    const admin = adminClient(env);
-    const { data: mappings, error } = await admin
-      .from("square_service_mappings")
-      .select("square_variation_id, treatment_id, tint_product_type, eyelash_safe")
-      .eq("active", true);
-
-    if (error) return errorResponse(error.message, 500);
-
-    const services = attachServiceMappings(variations, mappings ?? []);
-    return json({ services });
-  } catch (err) {
-    if (err instanceof SquareApiError) return errorResponse(err.message, err.status);
-    throw err;
-  }
+  if (error) return errorResponse(error.message, 500);
+  return json({ services: data });
 }
 
-export async function listTeamMembersRoute(env: Env, url: URL): Promise<Response> {
-  const serviceVariationId = url.searchParams.get("service_variation_id") ?? undefined;
-  try {
-    const square = getSquareClient(env);
-    const teamMembers = await square.listTeamMembers(serviceVariationId);
-    return json({ teamMembers });
-  } catch (err) {
-    if (err instanceof SquareApiError) return errorResponse(err.message, err.status);
-    throw err;
-  }
+export async function listStaffForService(env: Env, url: URL): Promise<Response> {
+  const serviceId = url.searchParams.get("service_id");
+  if (!serviceId) return errorResponse("service_id is required");
+
+  const admin = adminClient(env);
+  const { data, error } = await admin
+    .from("service_staff")
+    .select("staff_members(id, display_name, active)")
+    .eq("service_id", serviceId);
+
+  if (error) return errorResponse(error.message, 500);
+  const staff = (data ?? [])
+    .map((row: any) => row.staff_members)
+    .filter((m: any): m is { id: string; display_name: string; active: boolean } => !!m && m.active)
+    .map(({ id, display_name }: any) => ({ id, display_name }));
+
+  return json({ staff });
 }
 
-// Genuine live availability, per booking step 4 — never cached.
+// Genuine live availability — computed from working hours + existing
+// bookings, never cached.
 export async function getAvailability(env: Env, url: URL): Promise<Response> {
   const parsed = availabilityQuerySchema.safeParse({
-    service_variation_id: url.searchParams.get("service_variation_id") ?? "",
+    service_id: url.searchParams.get("service_id") ?? "",
     date: url.searchParams.get("date") ?? "",
-    team_member_id: url.searchParams.get("team_member_id") ?? undefined,
+    staff_member_id: url.searchParams.get("staff_member_id") ?? undefined,
   });
   if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+  const { service_id, date, staff_member_id } = parsed.data;
 
-  try {
-    const square = getSquareClient(env);
-    const slots = await square.searchAvailability({
-      serviceVariationId: parsed.data.service_variation_id,
-      date: parsed.data.date,
-      teamMemberId: parsed.data.team_member_id,
-    });
-    return json({ slots });
-  } catch (err) {
-    if (err instanceof SquareApiError) return errorResponse(err.message, err.status);
-    throw err;
+  const admin = adminClient(env);
+
+  const { data: service, error: serviceError } = await admin
+    .from("services")
+    .select("id, duration_minutes")
+    .eq("id", service_id)
+    .maybeSingle();
+  if (serviceError) return errorResponse(serviceError.message, 500);
+  if (!service) return errorResponse("Service not found", 404);
+  if (!service.duration_minutes) {
+    return errorResponse("This treatment isn't available for online time-slot booking yet", 400);
   }
+
+  let staffQuery = admin
+    .from("service_staff")
+    .select("staff_members(id, display_name, active)")
+    .eq("service_id", service_id);
+  if (staff_member_id) staffQuery = staffQuery.eq("staff_member_id", staff_member_id);
+  const { data: staffRows, error: staffError } = await staffQuery;
+  if (staffError) return errorResponse(staffError.message, 500);
+
+  const staffMembers = (staffRows ?? [])
+    .map((row: any) => row.staff_members)
+    .filter((m: any): m is { id: string; display_name: string; active: boolean } => !!m && m.active);
+
+  const dayOfWeek = toDayOfWeek(date);
+  const dayStart = `${date}T00:00:00.000Z`;
+  const dayEnd = `${date}T23:59:59.999Z`;
+
+  const allSlots: { staffMemberId: string; staffMemberName: string; startAt: string; endAt: string }[] = [];
+
+  for (const member of staffMembers) {
+    const { data: hoursRow } = await admin
+      .from("staff_working_hours")
+      .select("start_time, end_time")
+      .eq("staff_member_id", member.id)
+      .eq("day_of_week", dayOfWeek)
+      .maybeSingle();
+
+    const { data: bookedRows, error: bookedError } = await admin
+      .from("appointments")
+      .select("scheduled_at, end_at")
+      .eq("staff_member_id", member.id)
+      .neq("status", "cancelled")
+      .gte("scheduled_at", dayStart)
+      .lte("scheduled_at", dayEnd);
+    if (bookedError) return errorResponse(bookedError.message, 500);
+
+    const slots = computeAvailableSlots({
+      dateIso: date,
+      durationMinutes: service.duration_minutes,
+      workingBlock: hoursRow ? { startTime: hoursRow.start_time, endTime: hoursRow.end_time } : null,
+      bookedIntervals: (bookedRows ?? []).map((b) => ({ startAt: b.scheduled_at, endAt: b.end_at })),
+      nowIso: new Date().toISOString(),
+    });
+
+    for (const slot of slots) {
+      allSlots.push({ staffMemberId: member.id, staffMemberName: member.display_name, ...slot });
+    }
+  }
+
+  allSlots.sort((a, b) => a.startAt.localeCompare(b.startAt));
+  return json({ slots: allSlots });
 }
 
-// Search-then-create against Square Customers, avoiding duplicate Square
-// customer records (workflow step 8). clients.square_customer_id is a cache,
-// never authoritative — Square stays the actual source of truth.
+// Plain upsert-by-email; no external customer system to reconcile with.
 export async function lookupOrCreateCustomer(request: Request, env: Env): Promise<Response> {
   let body: unknown;
   try {
@@ -88,67 +137,32 @@ export async function lookupOrCreateCustomer(request: Request, env: Env): Promis
   const email = contact.email.toLowerCase();
 
   const admin = adminClient(env);
+  const { data: existingClient, error: lookupError } = await admin
+    .from("clients")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle();
+  if (lookupError) return errorResponse(lookupError.message, 500);
 
-  try {
-    const square = getSquareClient(env);
-
-    const { data: existingClient, error: lookupError } = await admin
+  let clientId: string;
+  if (existingClient) {
+    clientId = existingClient.id;
+    const { error: updateError } = await admin
       .from("clients")
-      .select("id, square_customer_id")
-      .eq("email", email)
-      .maybeSingle();
-    if (lookupError) return errorResponse(lookupError.message, 500);
-
-    let squareCustomerId = existingClient?.square_customer_id ?? null;
-
-    if (!squareCustomerId) {
-      const existingSquareCustomer = await square.searchCustomerByEmail(email);
-      squareCustomerId = existingSquareCustomer
-        ? existingSquareCustomer.id
-        : (
-            await square.createCustomer({
-              givenName: contact.first_name,
-              familyName: contact.last_name,
-              emailAddress: email,
-              phoneNumber: contact.phone,
-            })
-          ).id;
-    }
-
-    let clientId: string;
-    if (existingClient) {
-      clientId = existingClient.id;
-      const { error: updateError } = await admin
-        .from("clients")
-        .update({
-          first_name: contact.first_name,
-          last_name: contact.last_name,
-          phone: contact.phone,
-          square_customer_id: squareCustomerId,
-        })
-        .eq("id", clientId);
-      if (updateError) return errorResponse(updateError.message, 500);
-    } else {
-      const { data: newClient, error: clientError } = await admin
-        .from("clients")
-        .insert({
-          first_name: contact.first_name,
-          last_name: contact.last_name,
-          email,
-          phone: contact.phone,
-          square_customer_id: squareCustomerId,
-        })
-        .select("id")
-        .single();
-      if (clientError || !newClient) return errorResponse(clientError?.message ?? "Could not create client", 500);
-      clientId = newClient.id;
-    }
-
-    return json({ client_id: clientId, square_customer_id: squareCustomerId });
-  } catch (err) {
-    if (err instanceof SquareApiError) return errorResponse(err.message, err.status);
-    throw err;
+      .update({ first_name: contact.first_name, last_name: contact.last_name, phone: contact.phone })
+      .eq("id", clientId);
+    if (updateError) return errorResponse(updateError.message, 500);
+  } else {
+    const { data: newClient, error: clientError } = await admin
+      .from("clients")
+      .insert({ first_name: contact.first_name, last_name: contact.last_name, email, phone: contact.phone })
+      .select("id")
+      .single();
+    if (clientError || !newClient) return errorResponse(clientError?.message ?? "Could not create client", 500);
+    clientId = newClient.id;
   }
+
+  return json({ client_id: clientId });
 }
 
 export async function createAppointment(request: Request, env: Env): Promise<Response> {
@@ -165,91 +179,76 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
 
   const admin = adminClient(env);
 
-  const { data: client, error: clientError } = await admin
-    .from("clients")
-    .select("id, square_customer_id")
-    .eq("id", input.client_id)
+  // Re-fetch authoritative price/duration/name server-side -- never trust
+  // client-supplied values for what Kaaya's own services table owns.
+  const { data: service, error: serviceError } = await admin
+    .from("services")
+    .select("id, name, duration_minutes, price_amount, price_currency")
+    .eq("id", input.service_id)
     .maybeSingle();
-  if (clientError) return errorResponse(clientError.message, 500);
-  if (!client || client.square_customer_id !== input.square_customer_id) {
-    return errorResponse("Client does not match the supplied Square customer", 400);
-  }
+  if (serviceError) return errorResponse(serviceError.message, 500);
+  if (!service || !service.duration_minutes) return errorResponse("Service not bookable", 400);
 
-  try {
-    const square = getSquareClient(env);
-    // Re-fetch authoritative price/duration/name at booking time — never
-    // trust client-supplied values for what Square is the source of truth for.
-    const variation = await square.getServiceVariation(input.square_service_variation_id);
+  const startAt = new Date(input.start_at);
+  const endAt = new Date(startAt.getTime() + service.duration_minutes * 60000);
+  const idempotencyKey = crypto.randomUUID();
 
-    const idempotencyKey = crypto.randomUUID();
-    const booking = await square.createBooking({
-      startAt: input.start_at,
-      customerId: input.square_customer_id,
-      teamMemberId: input.team_member_id,
-      serviceVariationId: variation.squareVariationId,
-      serviceVariationVersion: variation.version,
-      durationMinutes: variation.durationMinutes ?? 30,
-      idempotencyKey,
-    });
+  const { data: appointment, error: appointmentError } = await admin
+    .from("appointments")
+    .insert({
+      client_id: input.client_id,
+      service_id: service.id,
+      staff_member_id: input.staff_member_id,
+      service_name: service.name,
+      duration_minutes: service.duration_minutes,
+      price_amount: service.price_amount,
+      price_currency: service.price_currency,
+      idempotency_key: idempotencyKey,
+      status: "scheduled",
+      scheduled_at: startAt.toISOString(),
+      end_at: endAt.toISOString(),
+    })
+    .select("id")
+    .single();
 
-    const { data: appointment, error: appointmentError } = await admin
-      .from("appointments")
-      .insert({
-        client_id: client.id,
-        square_booking_id: booking.id,
-        square_customer_id: input.square_customer_id,
-        square_team_member_id: input.team_member_id,
-        square_location_id: env.SQUARE_LOCATION_ID,
-        square_service_id: input.square_service_id,
-        square_service_variation_id: variation.squareVariationId,
-        service_name_snapshot: buildServiceNameSnapshot(variation.serviceName, variation.variationName),
-        duration_minutes_snapshot: variation.durationMinutes,
-        price_amount_snapshot: variation.priceAmount,
-        price_currency_snapshot: variation.priceCurrency,
-        square_idempotency_key: idempotencyKey,
-        status: "scheduled",
-        scheduled_at: booking.startAt,
-      })
-      .select("id")
-      .single();
-
-    if (appointmentError || !appointment) {
-      return errorResponse(appointmentError?.message ?? "Could not save appointment", 500);
+  if (appointmentError) {
+    // Postgres exclusion-constraint violation -- someone else booked this
+    // staff member's overlapping time first. The real race-safety guard;
+    // the availability check above is just the common-case UX.
+    if (appointmentError.code === "23P01") {
+      return errorResponse("This time was just booked — please pick another slot.", 409);
     }
-
-    await recordAuditEvent(admin, {
-      appointment_id: appointment.id,
-      actor_id: null,
-      actor_type: "client",
-      event_type: "appointment_booked",
-      metadata: { square_booking_id: booking.id },
-    });
-
-    return json(
-      {
-        appointment_id: appointment.id,
-        square_booking_id: booking.id,
-        summary: {
-          service_name: variation.serviceName,
-          variation_name: variation.variationName,
-          duration_minutes: variation.durationMinutes,
-          price_amount: variation.priceAmount,
-          price_currency: variation.priceCurrency,
-          start_at: booking.startAt,
-        },
-      },
-      201
-    );
-  } catch (err) {
-    if (err instanceof SquareApiError) return errorResponse(err.message, err.status);
-    throw err;
+    return errorResponse(appointmentError.message, 500);
   }
+  if (!appointment) return errorResponse("Could not save appointment", 500);
+
+  await recordAuditEvent(admin, {
+    appointment_id: appointment.id,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "appointment_booked",
+    metadata: { service_id: service.id, staff_member_id: input.staff_member_id },
+  });
+
+  return json(
+    {
+      appointment_id: appointment.id,
+      booking_reference: idempotencyKey,
+      summary: {
+        service_name: service.name,
+        duration_minutes: service.duration_minutes,
+        price_amount: service.price_amount,
+        price_currency: service.price_currency,
+        start_at: startAt.toISOString(),
+      },
+    },
+    201
+  );
 }
 
-// Wires up appointments.consultation_id after the fact (booking happens
-// before the consultation form, per workflow steps 14-15). Self-verifying:
-// the caller can only know square_booking_id if they were actually present
-// through the booking confirmation step, so no new token/table is needed.
+// Wires up appointments.consultation_id after the fact. Self-verifying: the
+// caller can only know booking_reference (the appointment's idempotency
+// key) if they were actually present through the booking confirmation step.
 export async function linkAppointmentToConsultation(
   request: Request,
   env: Env,
@@ -264,17 +263,17 @@ export async function linkAppointmentToConsultation(
 
   const parsed = linkAppointmentToConsultationSchema.safeParse(body);
   if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
-  const { consultation_id, square_booking_id } = parsed.data;
+  const { consultation_id, booking_reference } = parsed.data;
 
   const admin = adminClient(env);
 
   const { data: appointment, error: appointmentError } = await admin
     .from("appointments")
-    .select("id, client_id, square_booking_id")
+    .select("id, client_id, idempotency_key")
     .eq("id", appointmentId)
     .maybeSingle();
   if (appointmentError) return errorResponse(appointmentError.message, 500);
-  if (!appointment || appointment.square_booking_id !== square_booking_id) {
+  if (!appointment || appointment.idempotency_key !== booking_reference) {
     return errorResponse("Appointment not found", 404);
   }
 
@@ -288,10 +287,7 @@ export async function linkAppointmentToConsultation(
     return errorResponse("Consultation does not match this appointment's client", 400);
   }
 
-  const { error: updateError } = await admin
-    .from("appointments")
-    .update({ consultation_id })
-    .eq("id", appointmentId);
+  const { error: updateError } = await admin.from("appointments").update({ consultation_id }).eq("id", appointmentId);
   if (updateError) return errorResponse(updateError.message, 500);
 
   await recordAuditEvent(admin, {
@@ -300,7 +296,7 @@ export async function linkAppointmentToConsultation(
     actor_id: null,
     actor_type: "client",
     event_type: "appointment_linked_to_consultation",
-    metadata: { square_booking_id },
+    metadata: { booking_reference },
   });
 
   return json({ linked: true });

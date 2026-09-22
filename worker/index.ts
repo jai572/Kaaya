@@ -5,14 +5,29 @@ import { submitConsultation, getClientConsultation, finalizeConsultation } from 
 import { listStaffConsultations, getStaffConsultation, recordStaffReview } from "./routes/staff";
 import {
   listBookableServices,
-  listTeamMembersRoute,
+  listStaffForService,
   getAvailability,
   lookupOrCreateCustomer,
   createAppointment,
   linkAppointmentToConsultation,
 } from "./routes/booking";
-import { listServicesForMapping, createServiceMapping, updateServiceMapping } from "./routes/staffBooking";
-import { seedSandboxCatalogItem } from "./routes/devSeed";
+import {
+  listServicesAdmin,
+  createService,
+  updateService,
+  listStaffMembers,
+  createStaffMember,
+  updateStaffMember,
+  getStaffWorkingHours,
+  setStaffWorkingHours,
+  getServiceStaffCapabilities,
+  setServiceStaffCapabilities,
+  listAppointments,
+  cancelAppointment,
+  getRevenueSummary,
+  listStaffPermissions,
+  setStaffPermissions,
+} from "./routes/staffBooking";
 import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -41,8 +56,8 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
     return listBookableServices(env);
   }
 
-  if (path === "/api/booking/team-members" && method === "GET") {
-    return listTeamMembersRoute(env, url);
+  if (path === "/api/booking/staff" && method === "GET") {
+    return listStaffForService(env, url);
   }
 
   if (path === "/api/booking/availability" && method === "GET") {
@@ -77,20 +92,67 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   }
 
   if (path === "/api/staff/booking/services" && method === "GET") {
-    return listServicesForMapping(request, env);
+    return listServicesAdmin(request, env);
   }
 
-  if (path === "/api/staff/booking/mappings" && method === "POST") {
-    return createServiceMapping(request, env);
+  if (path === "/api/staff/booking/services" && method === "POST") {
+    return createService(request, env);
   }
 
-  const mappingMatch = path.match(/^\/api\/staff\/booking\/mappings\/([^/]+)$/);
-  if (mappingMatch && method === "PATCH") {
-    return updateServiceMapping(request, env, mappingMatch[1]);
+  const serviceMatch = path.match(/^\/api\/staff\/booking\/services\/([^/]+)$/);
+  if (serviceMatch && method === "PATCH") {
+    return updateService(request, env, serviceMatch[1]);
   }
 
-  if (path === "/api/_dev/seed-square-catalog" && method === "POST") {
-    return seedSandboxCatalogItem(env);
+  if (path === "/api/staff/booking/staff-members" && method === "GET") {
+    return listStaffMembers(request, env);
+  }
+
+  if (path === "/api/staff/booking/staff-members" && method === "POST") {
+    return createStaffMember(request, env);
+  }
+
+  const staffMemberMatch = path.match(/^\/api\/staff\/booking\/staff-members\/([^/]+)$/);
+  if (staffMemberMatch && method === "PATCH") {
+    return updateStaffMember(request, env, staffMemberMatch[1]);
+  }
+
+  const hoursMatch = path.match(/^\/api\/staff\/booking\/staff-members\/([^/]+)\/hours$/);
+  if (hoursMatch && method === "GET") {
+    return getStaffWorkingHours(request, env, hoursMatch[1]);
+  }
+  if (hoursMatch && method === "PUT") {
+    return setStaffWorkingHours(request, env, hoursMatch[1]);
+  }
+
+  const capabilityMatch = path.match(/^\/api\/staff\/booking\/services\/([^/]+)\/staff$/);
+  if (capabilityMatch && method === "GET") {
+    return getServiceStaffCapabilities(request, env, capabilityMatch[1]);
+  }
+  if (capabilityMatch && method === "PUT") {
+    return setServiceStaffCapabilities(request, env, capabilityMatch[1]);
+  }
+
+  if (path === "/api/staff/booking/appointments" && method === "GET") {
+    return listAppointments(request, env, url);
+  }
+
+  const cancelMatch = path.match(/^\/api\/staff\/booking\/appointments\/([^/]+)\/cancel$/);
+  if (cancelMatch && method === "PATCH") {
+    return cancelAppointment(request, env, cancelMatch[1]);
+  }
+
+  if (path === "/api/staff/booking/revenue-summary" && method === "GET") {
+    return getRevenueSummary(request, env, url);
+  }
+
+  if (path === "/api/staff/permissions" && method === "GET") {
+    return listStaffPermissions(request, env);
+  }
+
+  const permissionsMatch = path.match(/^\/api\/staff\/permissions\/([^/]+)$/);
+  if (permissionsMatch && method === "PUT") {
+    return setStaffPermissions(request, env, permissionsMatch[1]);
   }
 
   return errorResponse("Not found", 404);

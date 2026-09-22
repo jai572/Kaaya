@@ -39,8 +39,50 @@ export async function requireStaff(request: Request, env: Env): Promise<StaffCon
 }
 
 /** Throws if the staff member's role isn't one of `allowed`. Used for surfaces
- * where a mistake has clinical consequences (e.g. Square service mapping),
- * not just general staff access. */
+ * where a mistake has clinical consequences, or that only the account owner
+ * should ever manage (e.g. staff permissions themselves) — not capability-
+ * overridable, unlike requireCapability below. */
 export function requireRole(staff: StaffContext, allowed: StaffContext["role"][]): void {
   if (!allowed.includes(staff.role)) throw new AuthError("Insufficient role", 403);
+}
+
+// Feature keys the owner can individually grant/revoke per staff login via
+// /staff/permissions, layered on top of the role defaults below.
+export type FeatureKey =
+  | "manage_services"
+  | "manage_staff_members"
+  | "manage_service_capability"
+  | "view_all_bookings"
+  | "manage_all_bookings"
+  | "view_revenue";
+
+/** An explicit per-staff override (grant or deny) always wins over the
+ * role's default. No override row -> falls back to defaultAllowedRoles. */
+export async function hasCapability(
+  env: Env,
+  staff: StaffContext,
+  featureKey: FeatureKey,
+  defaultAllowedRoles: StaffContext["role"][]
+): Promise<boolean> {
+  const admin = adminClient(env);
+  const { data: override } = await admin
+    .from("staff_feature_overrides")
+    .select("granted")
+    .eq("staff_profile_id", staff.id)
+    .eq("feature_key", featureKey)
+    .maybeSingle();
+
+  if (override) return override.granted;
+  return defaultAllowedRoles.includes(staff.role);
+}
+
+export async function requireCapability(
+  env: Env,
+  staff: StaffContext,
+  featureKey: FeatureKey,
+  defaultAllowedRoles: StaffContext["role"][]
+): Promise<void> {
+  if (!(await hasCapability(env, staff, featureKey, defaultAllowedRoles))) {
+    throw new AuthError("Insufficient permission", 403);
+  }
 }
