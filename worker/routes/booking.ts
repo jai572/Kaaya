@@ -9,6 +9,7 @@ import {
   createAppointmentSchema,
   linkAppointmentToConsultationSchema,
 } from "../lib/bookingValidation";
+import { attachServiceMappings, buildServiceNameSnapshot } from "../lib/bookingLogic";
 
 // Square is the live source of truth here — this only decorates Square's
 // own bookable services with whichever Kaaya screening treatment (if any)
@@ -27,12 +28,7 @@ export async function listBookableServices(env: Env): Promise<Response> {
 
     if (error) return errorResponse(error.message, 500);
 
-    const mappingByVariation = new Map((mappings ?? []).map((m) => [m.square_variation_id, m]));
-    const services = variations.map((v) => ({
-      ...v,
-      mapping: mappingByVariation.get(v.squareVariationId) ?? null,
-    }));
-
+    const services = attachServiceMappings(variations, mappings ?? []);
     return json({ services });
   } catch (err) {
     if (err instanceof SquareApiError) return errorResponse(err.message, err.status);
@@ -206,7 +202,7 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
         square_location_id: env.SQUARE_LOCATION_ID,
         square_service_id: input.square_service_id,
         square_service_variation_id: variation.squareVariationId,
-        service_name_snapshot: `${variation.serviceName} - ${variation.variationName}`,
+        service_name_snapshot: buildServiceNameSnapshot(variation.serviceName, variation.variationName),
         duration_minutes_snapshot: variation.durationMinutes,
         price_amount_snapshot: variation.priceAmount,
         price_currency_snapshot: variation.priceCurrency,

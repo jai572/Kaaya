@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import type { AppointmentSummary, BookingContact } from "../../lib/api";
+import { formatMoney } from "../../lib/bookingFormat";
 
 interface ConfirmedState {
   appointmentId: string;
@@ -7,11 +8,6 @@ interface ConfirmedState {
   clientId: string;
   contact: BookingContact;
   summary: AppointmentSummary;
-}
-
-function formatMoney(amount: number | null, currency: string | null): string {
-  if (amount == null || !currency) return "Price on request";
-  return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(amount / 100);
 }
 
 export default function BookingConfirmed() {

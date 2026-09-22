@@ -5,6 +5,7 @@ import { requireStaff, requireRole, AuthError } from "../lib/auth";
 import { getSquareClient, SquareApiError } from "../lib/square";
 import { recordAuditEvent } from "../lib/audit";
 import { createServiceMappingSchema, updateServiceMappingSchema } from "../lib/bookingValidation";
+import { attachServiceMappings } from "../lib/bookingLogic";
 
 // Read-only: any active staff member can see the mapping state, only
 // admin/owner can change it (see requireRole below) — a wrong mapping
@@ -36,12 +37,7 @@ export async function listServicesForMapping(request: Request, env: Env): Promis
     if (treatmentsResult.error) return errorResponse(treatmentsResult.error.message, 500);
     if (mappingsResult.error) return errorResponse(mappingsResult.error.message, 500);
 
-    const mappingByVariation = new Map((mappingsResult.data ?? []).map((m) => [m.square_variation_id, m]));
-    const services = variations.map((v) => ({
-      ...v,
-      mapping: mappingByVariation.get(v.squareVariationId) ?? null,
-    }));
-
+    const services = attachServiceMappings(variations, mappingsResult.data ?? []);
     return json({ services, treatments: treatmentsResult.data ?? [] });
   } catch (err) {
     if (err instanceof SquareApiError) return errorResponse(err.message, err.status);

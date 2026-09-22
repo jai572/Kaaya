@@ -12,6 +12,7 @@ import {
   linkAppointmentToConsultation,
 } from "./routes/booking";
 import { listServicesForMapping, createServiceMapping, updateServiceMapping } from "./routes/staffBooking";
+import { seedSandboxCatalogItem } from "./routes/devSeed";
 import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -86,6 +87,10 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   const mappingMatch = path.match(/^\/api\/staff\/booking\/mappings\/([^/]+)$/);
   if (mappingMatch && method === "PATCH") {
     return updateServiceMapping(request, env, mappingMatch[1]);
+  }
+
+  if (path === "/api/_dev/seed-square-catalog" && method === "POST") {
+    return seedSandboxCatalogItem(env);
   }
 
   return errorResponse("Not found", 404);

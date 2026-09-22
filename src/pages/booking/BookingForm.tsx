@@ -10,26 +10,10 @@ import {
   type TeamMember,
   type AvailabilitySlot,
 } from "../../lib/api";
+import { formatMoney, formatDuration, todayIso, filterSlotsByTeamMember } from "../../lib/bookingFormat";
 
 const STEPS = ["service", "date", "time", "contact", "summary"] as const;
 type Step = (typeof STEPS)[number];
-
-function formatMoney(amount: number | null, currency: string | null): string {
-  if (amount == null || !currency) return "Price on request";
-  return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(amount / 100);
-}
-
-function formatDuration(minutes: number | null): string {
-  if (!minutes) return "";
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default function BookingForm() {
   const navigate = useNavigate();
@@ -85,7 +69,7 @@ export default function BookingForm() {
       .finally(() => setSlotsLoading(false));
   }, [step, selectedVariationId, date]);
 
-  const visibleSlots = selectedTeamMemberId ? slots.filter((s) => s.teamMemberId === selectedTeamMemberId) : slots;
+  const visibleSlots = filterSlotsByTeamMember(slots, selectedTeamMemberId);
   const slotTeamMemberIds = useMemo(() => new Set(slots.map((s) => s.teamMemberId)), [slots]);
   const availableTeamMembers = teamMembers.filter((m) => slotTeamMemberIds.has(m.id));
 
