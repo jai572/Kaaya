@@ -62,7 +62,7 @@ export async function listStaffConsultations(request: Request, env: Env): Promis
     admin
       .from("consultations")
       .select(
-        `id, status, submitted_at, version, valid_until, supersedes_consultation_id,
+        `id, status, submitted_at, version, valid_until, supersedes_consultation_id, client_id,
          clients(first_name, last_name),
          consultation_services(treatments(name)),
          consultation_flags(severity),
@@ -84,6 +84,7 @@ export async function listStaffConsultations(request: Request, env: Env): Promis
     version: number;
     valid_until: string | null;
     supersedes_consultation_id: string | null;
+    client_id: string | null;
     clients: { first_name: string; last_name: string } | null;
     consultation_services: { treatments: { name: string } | null }[];
     consultation_flags: { severity: Severity }[];
@@ -97,6 +98,7 @@ export async function listStaffConsultations(request: Request, env: Env): Promis
     const latestReview = [...c.staff_reviews].sort((a, b) => b.decided_at.localeCompare(a.decided_at))[0];
     return {
       id: c.id,
+      client_id: c.client_id,
       client_name: c.clients ? `${c.clients.first_name} ${c.clients.last_name}` : "Unknown client",
       treatments: c.consultation_services.map((s) => s.treatments?.name).filter(Boolean),
       submitted_at: c.submitted_at,

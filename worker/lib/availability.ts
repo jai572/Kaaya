@@ -62,8 +62,42 @@ export function londonWallTimeToUtcIso(dateIso: string, timeHms: string): string
   return new Date(naiveUtc.getTime() - offsetMinutes * 60000).toISOString();
 }
 
+/** The inverse of londonWallTimeToUtcIso's date half: which salon-local
+ * calendar date a UTC instant falls on. Needed to re-validate a booking
+ * request that only carries a UTC start_at (not a separate date field)
+ * against the right day's working_hours row. */
+export function londonDateIso(instantIso: string): string {
+  const dtf = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" });
+  return dtf.format(new Date(instantIso)); // en-CA formats as YYYY-MM-DD
+}
+
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd;
+}
+
+/** Whether a specific requested interval sits fully inside a staff member's
+ * working hours for that date, and isn't in the past. Same block-bound
+ * logic as computeAvailableSlots, but checking one exact interval (used to
+ * re-validate a booking/reschedule request server-side) rather than
+ * generating the list of offered slots. */
+export function isWithinWorkingHours(params: {
+  dateIso: string;
+  startAtIso: string;
+  endAtIso: string;
+  workingBlock: WorkingBlock | null;
+  nowIso?: string;
+}): boolean {
+  const { dateIso, startAtIso, endAtIso, workingBlock, nowIso } = params;
+  if (!workingBlock) return false;
+
+  const blockStart = new Date(londonWallTimeToUtcIso(dateIso, workingBlock.startTime)).getTime();
+  const blockEnd = new Date(londonWallTimeToUtcIso(dateIso, workingBlock.endTime)).getTime();
+  const start = new Date(startAtIso).getTime();
+  const end = new Date(endAtIso).getTime();
+  const now = nowIso ? new Date(nowIso).getTime() : null;
+
+  if (now !== null && start <= now) return false;
+  return start >= blockStart && end <= blockEnd;
 }
 
 export function computeAvailableSlots(params: {

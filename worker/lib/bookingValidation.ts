@@ -26,6 +26,34 @@ export const linkAppointmentToConsultationSchema = z.object({
   booking_reference: z.string().uuid(),
 });
 
+export const appointmentReferenceQuerySchema = z.object({
+  booking_reference: z.string().uuid(),
+});
+
+export const clientCancelAppointmentSchema = z.object({
+  booking_reference: z.string().uuid(),
+  reason: z.string().trim().max(2000).optional(),
+});
+
+export const clientRequestRescheduleSchema = z.object({
+  booking_reference: z.string().uuid(),
+  new_start_at: z.string().datetime({ offset: true }),
+  new_staff_member_id: z.string().uuid().optional(),
+});
+
+export const staffCancelAppointmentSchema = z.object({
+  reason: z.string().trim().max(2000).optional(),
+});
+
+export const staffRescheduleAppointmentSchema = z.object({
+  new_start_at: z.string().datetime({ offset: true }),
+  new_staff_member_id: z.string().uuid().optional(),
+});
+
+export const resolveChangeRequestSchema = z.object({
+  decision: z.enum(["approve", "reject"]),
+});
+
 export const createServiceSchema = z.object({
   name: z.string().trim().min(1),
   category_slug: z.string().trim().min(1),

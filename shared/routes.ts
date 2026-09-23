@@ -22,7 +22,9 @@ export const KNOWN_ROUTE_PATTERNS: RegExp[] = [
   /^\/consultation\/[^/]+\/submitted$/,
   /^\/c\/[^/]+$/,
   /^\/staff\/consultations\/[^/]+$/,
+  /^\/staff\/clients\/[^/]+$/,
   /^\/book\/[^/]+\/confirmed$/,
+  /^\/book\/[^/]+\/manage$/,
 ];
 
 export function isKnownRoute(pathname: string): boolean {

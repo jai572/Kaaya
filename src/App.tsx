@@ -20,8 +20,10 @@ const StaffServices = lazy(() => import("./pages/staff/StaffServices"));
 const StaffMembers = lazy(() => import("./pages/staff/StaffMembers"));
 const StaffBookings = lazy(() => import("./pages/staff/StaffBookings"));
 const StaffPermissions = lazy(() => import("./pages/staff/StaffPermissions"));
+const StaffClientRecord = lazy(() => import("./pages/staff/StaffClientRecord"));
 const BookingForm = lazy(() => import("./pages/booking/BookingForm"));
 const BookingConfirmed = lazy(() => import("./pages/booking/BookingConfirmed"));
+const ManageBooking = lazy(() => import("./pages/booking/ManageBooking"));
 
 export default function App() {
   return (
@@ -34,6 +36,7 @@ export default function App() {
         <Route path="/contact" element={<Contact />} />
         <Route path="/book" element={<BookingForm />} />
         <Route path="/book/:appointmentId/confirmed" element={<BookingConfirmed />} />
+        <Route path="/book/:appointmentId/manage" element={<ManageBooking />} />
 
         <Route path="/consultation" element={<ConsultationForm />} />
         <Route path="/consultation/:id/submitted" element={<ConsultationSubmitted />} />
@@ -46,6 +49,7 @@ export default function App() {
         <Route path="/staff/staff-members" element={<StaffMembers />} />
         <Route path="/staff/bookings" element={<StaffBookings />} />
         <Route path="/staff/permissions" element={<StaffPermissions />} />
+        <Route path="/staff/clients/:clientId" element={<StaffClientRecord />} />
 
         <Route path="*" element={<NotFound />} />
       </Routes>

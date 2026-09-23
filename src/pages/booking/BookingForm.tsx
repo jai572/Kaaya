@@ -129,7 +129,14 @@ export default function BookingForm() {
       });
 
       navigate(`/book/${appointment_id}/confirmed`, {
-        state: { appointmentId: appointment_id, bookingReference: booking_reference, clientId: client_id, contact, summary },
+        state: {
+          appointmentId: appointment_id,
+          bookingReference: booking_reference,
+          clientId: client_id,
+          serviceId: selectedService.id,
+          contact,
+          summary,
+        },
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");

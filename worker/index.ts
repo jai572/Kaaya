@@ -10,6 +10,9 @@ import {
   lookupOrCreateCustomer,
   createAppointment,
   linkAppointmentToConsultation,
+  getAppointmentByReference,
+  clientCancelAppointment,
+  clientRequestReschedule,
 } from "./routes/booking";
 import {
   listServicesAdmin,
@@ -23,7 +26,14 @@ import {
   getServiceStaffCapabilities,
   setServiceStaffCapabilities,
   listAppointments,
+  approveAppointment,
   cancelAppointment,
+  rescheduleAppointment,
+  markCompleted,
+  markNoShow,
+  listChangeRequests,
+  resolveChangeRequest,
+  getClientRecord,
   getRevenueSummary,
   listStaffPermissions,
   setStaffPermissions,
@@ -75,6 +85,21 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   const linkConsultationMatch = path.match(/^\/api\/booking\/appointments\/([^/]+)\/consultation$/);
   if (linkConsultationMatch && method === "PATCH") {
     return linkAppointmentToConsultation(request, env, linkConsultationMatch[1]);
+  }
+
+  const appointmentRefMatch = path.match(/^\/api\/booking\/appointments\/([^/]+)$/);
+  if (appointmentRefMatch && method === "GET") {
+    return getAppointmentByReference(env, url, appointmentRefMatch[1]);
+  }
+
+  const clientCancelMatch = path.match(/^\/api\/booking\/appointments\/([^/]+)\/cancel$/);
+  if (clientCancelMatch && method === "POST") {
+    return clientCancelAppointment(request, env, clientCancelMatch[1]);
+  }
+
+  const clientRescheduleMatch = path.match(/^\/api\/booking\/appointments\/([^/]+)\/reschedule$/);
+  if (clientRescheduleMatch && method === "POST") {
+    return clientRequestReschedule(request, env, clientRescheduleMatch[1]);
   }
 
   if (path === "/api/staff/consultations" && method === "GET") {
@@ -137,9 +162,43 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
     return listAppointments(request, env, url);
   }
 
+  const approveMatch = path.match(/^\/api\/staff\/booking\/appointments\/([^/]+)\/approve$/);
+  if (approveMatch && method === "PATCH") {
+    return approveAppointment(request, env, approveMatch[1]);
+  }
+
   const cancelMatch = path.match(/^\/api\/staff\/booking\/appointments\/([^/]+)\/cancel$/);
   if (cancelMatch && method === "PATCH") {
     return cancelAppointment(request, env, cancelMatch[1]);
+  }
+
+  const rescheduleMatch = path.match(/^\/api\/staff\/booking\/appointments\/([^/]+)\/reschedule$/);
+  if (rescheduleMatch && method === "PATCH") {
+    return rescheduleAppointment(request, env, rescheduleMatch[1]);
+  }
+
+  const completeMatch = path.match(/^\/api\/staff\/booking\/appointments\/([^/]+)\/complete$/);
+  if (completeMatch && method === "PATCH") {
+    return markCompleted(request, env, completeMatch[1]);
+  }
+
+  const noShowMatch = path.match(/^\/api\/staff\/booking\/appointments\/([^/]+)\/no-show$/);
+  if (noShowMatch && method === "PATCH") {
+    return markNoShow(request, env, noShowMatch[1]);
+  }
+
+  if (path === "/api/staff/booking/change-requests" && method === "GET") {
+    return listChangeRequests(request, env, url);
+  }
+
+  const resolveChangeRequestMatch = path.match(/^\/api\/staff\/booking\/change-requests\/([^/]+)\/resolve$/);
+  if (resolveChangeRequestMatch && method === "PATCH") {
+    return resolveChangeRequest(request, env, resolveChangeRequestMatch[1]);
+  }
+
+  const clientRecordMatch = path.match(/^\/api\/staff\/clients\/([^/]+)$/);
+  if (clientRecordMatch && method === "GET") {
+    return getClientRecord(request, env, clientRecordMatch[1]);
   }
 
   if (path === "/api/staff/booking/revenue-summary" && method === "GET") {

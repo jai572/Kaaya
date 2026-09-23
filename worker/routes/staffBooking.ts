@@ -1,8 +1,16 @@
 import type { Env } from "../env";
 import { adminClient } from "../lib/supabase";
 import { json, errorResponse } from "../lib/http";
-import { requireStaff, requireRole, requireCapability, hasCapability, AuthError, type FeatureKey } from "../lib/auth";
+import { requireStaff, requireRole, requireCapability, hasCapability, AuthError, type FeatureKey, type StaffContext } from "../lib/auth";
 import { recordAuditEvent } from "../lib/audit";
+import {
+  performApprove,
+  performCancel,
+  performComplete,
+  performNoShow,
+  performReschedule,
+  LifecycleError,
+} from "../lib/bookingLifecycle";
 import {
   createServiceSchema,
   updateServiceSchema,
@@ -11,6 +19,9 @@ import {
   setStaffWorkingHoursSchema,
   setServiceStaffCapabilitySchema,
   setStaffPermissionsSchema,
+  staffCancelAppointmentSchema,
+  staffRescheduleAppointmentSchema,
+  resolveChangeRequestSchema,
 } from "../lib/bookingValidation";
 
 const FEATURE_KEYS: FeatureKey[] = [
@@ -263,11 +274,16 @@ export async function listAppointments(request: Request, env: Env, url: URL): Pr
 
     let query = admin
       .from("appointments")
-      .select("id, client_id, service_id, staff_member_id, service_name, duration_minutes, price_amount, price_currency, status, scheduled_at, end_at")
+      .select(
+        "id, client_id, service_id, staff_member_id, service_name, duration_minutes, price_amount, price_currency, status, scheduled_at, end_at, rescheduled_to_id"
+      )
       .order("scheduled_at", { ascending: true });
 
     const date = url.searchParams.get("date");
     if (date) query = query.gte("scheduled_at", `${date}T00:00:00.000Z`).lte("scheduled_at", `${date}T23:59:59.999Z`);
+
+    const status = url.searchParams.get("status");
+    if (status) query = query.eq("status", status);
 
     if (!canViewAll) {
       const ownId = await ownStaffMemberId(env, staff.id);
@@ -282,29 +298,250 @@ export async function listAppointments(request: Request, env: Env, url: URL): Pr
   });
 }
 
+// Shared by every staff action below: own appointment is always allowed,
+// someone else's needs the existing manage_all_bookings capability -- same
+// gate cancelAppointment already used, now reused for approve/reschedule/
+// complete/no-show too instead of re-deriving it per action.
+async function assertCanActOnAppointment(env: Env, staff: StaffContext, appointmentId: string): Promise<Response | null> {
+  const admin = adminClient(env);
+  const canManageAll = await hasCapability(env, staff, "manage_all_bookings", ["admin", "owner"]);
+  if (canManageAll) return null;
+
+  const ownId = await ownStaffMemberId(env, staff.id);
+  const { data: appointment } = await admin.from("appointments").select("staff_member_id").eq("id", appointmentId).maybeSingle();
+  if (!appointment || appointment.staff_member_id !== ownId) {
+    return errorResponse("Insufficient permission", 403);
+  }
+  return null;
+}
+
+export async function approveAppointment(request: Request, env: Env, appointmentId: string): Promise<Response> {
+  return withStaff(request, env, async (staff) => {
+    const denied = await assertCanActOnAppointment(env, staff, appointmentId);
+    if (denied) return denied;
+
+    const admin = adminClient(env);
+    try {
+      await performApprove(admin, appointmentId, { actorId: staff.id, actorType: "staff" });
+    } catch (e) {
+      if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
+      throw e;
+    }
+    return json({ status: "confirmed" });
+  });
+}
+
 export async function cancelAppointment(request: Request, env: Env, appointmentId: string): Promise<Response> {
   return withStaff(request, env, async (staff) => {
-    const admin = adminClient(env);
-    const canManageAll = await hasCapability(env, staff, "manage_all_bookings", ["admin", "owner"]);
+    const denied = await assertCanActOnAppointment(env, staff, appointmentId);
+    if (denied) return denied;
 
-    if (!canManageAll) {
-      const ownId = await ownStaffMemberId(env, staff.id);
-      const { data: appointment } = await admin.from("appointments").select("staff_member_id").eq("id", appointmentId).maybeSingle();
-      if (!appointment || appointment.staff_member_id !== ownId) {
-        return errorResponse("Insufficient permission", 403);
+    let body: unknown = {};
+    try {
+      const text = await request.text();
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      return errorResponse("Invalid JSON body");
+    }
+    const parsed = staffCancelAppointmentSchema.safeParse(body);
+    if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+
+    const admin = adminClient(env);
+    try {
+      await performCancel(admin, appointmentId, { actorId: staff.id, actorType: "staff" }, parsed.data.reason ?? null);
+    } catch (e) {
+      if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
+      throw e;
+    }
+    return json({ status: "cancelled" });
+  });
+}
+
+export async function rescheduleAppointment(request: Request, env: Env, appointmentId: string): Promise<Response> {
+  return withStaff(request, env, async (staff) => {
+    const denied = await assertCanActOnAppointment(env, staff, appointmentId);
+    if (denied) return denied;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return errorResponse("Invalid JSON body");
+    }
+    const parsed = staffRescheduleAppointmentSchema.safeParse(body);
+    if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+
+    const admin = adminClient(env);
+    try {
+      const { newAppointmentId } = await performReschedule(admin, {
+        appointmentId,
+        actor: { actorId: staff.id, actorType: "staff" },
+        newStartAtIso: parsed.data.new_start_at,
+        newStaffMemberId: parsed.data.new_staff_member_id,
+      });
+      return json({ status: "rescheduled", new_appointment_id: newAppointmentId });
+    } catch (e) {
+      if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
+      throw e;
+    }
+  });
+}
+
+export async function markCompleted(request: Request, env: Env, appointmentId: string): Promise<Response> {
+  return withStaff(request, env, async (staff) => {
+    const denied = await assertCanActOnAppointment(env, staff, appointmentId);
+    if (denied) return denied;
+
+    const admin = adminClient(env);
+    try {
+      await performComplete(admin, appointmentId, { actorId: staff.id, actorType: "staff" });
+    } catch (e) {
+      if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
+      throw e;
+    }
+    return json({ status: "completed" });
+  });
+}
+
+export async function markNoShow(request: Request, env: Env, appointmentId: string): Promise<Response> {
+  return withStaff(request, env, async (staff) => {
+    const denied = await assertCanActOnAppointment(env, staff, appointmentId);
+    if (denied) return denied;
+
+    const admin = adminClient(env);
+    try {
+      await performNoShow(admin, appointmentId, { actorId: staff.id, actorType: "staff" });
+    } catch (e) {
+      if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
+      throw e;
+    }
+    return json({ status: "no_show" });
+  });
+}
+
+// ---- Client-submitted change requests (queued when inside the 24h cutoff) ----
+
+export async function listChangeRequests(request: Request, env: Env, url: URL): Promise<Response> {
+  return withStaff(request, env, async (staff) => {
+    await requireCapability(env, staff, "manage_all_bookings", ["admin", "owner"]);
+
+    const admin = adminClient(env);
+    const status = url.searchParams.get("status") ?? "pending";
+    const { data, error } = await admin
+      .from("appointment_change_requests")
+      .select(
+        "id, appointment_id, request_type, requested_start_at, requested_staff_member_id, reason, status, created_at, appointments(id, client_id, service_name, scheduled_at, end_at, status)"
+      )
+      .eq("status", status)
+      .order("created_at", { ascending: true });
+    if (error) return errorResponse(error.message, 500);
+    return json({ changeRequests: data });
+  });
+}
+
+export async function resolveChangeRequest(request: Request, env: Env, changeRequestId: string): Promise<Response> {
+  return withStaff(request, env, async (staff) => {
+    await requireCapability(env, staff, "manage_all_bookings", ["admin", "owner"]);
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return errorResponse("Invalid JSON body");
+    }
+    const parsed = resolveChangeRequestSchema.safeParse(body);
+    if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+
+    const admin = adminClient(env);
+
+    // Atomic claim: the WHERE status='pending' makes this UPDATE only ever
+    // affect a row for the caller that actually wins the race. A second,
+    // concurrent resolveChangeRequest call (two staff clicking at once, or
+    // a retried request) gets back no row and is rejected below -- neither
+    // performCancel nor performReschedule ever runs twice for one request.
+    const { data: changeRequest, error: claimError } = await admin
+      .from("appointment_change_requests")
+      .update({
+        status: parsed.data.decision === "approve" ? "approved" : "rejected",
+        resolved_at: new Date().toISOString(),
+        resolved_by: staff.id,
+      })
+      .eq("id", changeRequestId)
+      .eq("status", "pending")
+      .select("id, appointment_id, request_type, requested_start_at, requested_staff_member_id, reason")
+      .maybeSingle();
+    if (claimError) return errorResponse(claimError.message, 500);
+    if (!changeRequest) {
+      const { data: existing } = await admin.from("appointment_change_requests").select("id").eq("id", changeRequestId).maybeSingle();
+      return errorResponse(existing ? "This request has already been resolved" : "Change request not found", existing ? 409 : 404);
+    }
+
+    const actor = { actorId: staff.id, actorType: "staff" as const };
+
+    if (parsed.data.decision === "approve") {
+      try {
+        if (changeRequest.request_type === "cancel") {
+          await performCancel(admin, changeRequest.appointment_id, actor, changeRequest.reason);
+        } else {
+          if (!changeRequest.requested_start_at) return errorResponse("Change request is missing a requested time", 500);
+          await performReschedule(admin, {
+            appointmentId: changeRequest.appointment_id,
+            actor,
+            newStartAtIso: changeRequest.requested_start_at,
+            newStaffMemberId: changeRequest.requested_staff_member_id ?? undefined,
+            reason: changeRequest.reason,
+          });
+        }
+      } catch (e) {
+        if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
+        throw e;
       }
     }
 
-    const { error } = await admin.from("appointments").update({ status: "cancelled" }).eq("id", appointmentId);
-    if (error) return errorResponse(error.message, 500);
-
     await recordAuditEvent(admin, {
-      appointment_id: appointmentId,
+      appointment_id: changeRequest.appointment_id,
       actor_id: staff.id,
       actor_type: "staff",
-      event_type: "appointment_cancelled",
+      event_type: "change_request_resolved",
+      metadata: { change_request_id: changeRequestId, decision: parsed.data.decision },
     });
-    return json({ cancelled: true });
+
+    return json({ resolved: parsed.data.decision });
+  });
+}
+
+// ---- Client record: full appointment + consultation history for one client ----
+
+export async function getClientRecord(request: Request, env: Env, clientId: string): Promise<Response> {
+  return withStaff(request, env, async () => {
+    const admin = adminClient(env);
+
+    const [clientRes, appointmentsRes, consultationsRes] = await Promise.all([
+      admin.from("clients").select("id, first_name, last_name, email, phone").eq("id", clientId).maybeSingle(),
+      admin
+        .from("appointments")
+        .select(
+          "id, service_name, duration_minutes, price_amount, price_currency, status, scheduled_at, end_at, staff_member_id, rescheduled_to_id"
+        )
+        .eq("client_id", clientId)
+        .order("scheduled_at", { ascending: true }),
+      admin
+        .from("consultations")
+        .select("id, status, submitted_at, created_at")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    if (clientRes.error) return errorResponse(clientRes.error.message, 500);
+    if (!clientRes.data) return errorResponse("Client not found", 404);
+    if (appointmentsRes.error) return errorResponse(appointmentsRes.error.message, 500);
+    if (consultationsRes.error) return errorResponse(consultationsRes.error.message, 500);
+
+    return json({
+      client: clientRes.data,
+      appointments: appointmentsRes.data,
+      consultations: consultationsRes.data,
+    });
   });
 }
 

@@ -171,6 +171,52 @@ export function linkAppointmentToConsultation(appointmentId: string, consultatio
   }) as Promise<{ linked: true }>;
 }
 
+// ---- Client self-service: cancel/reschedule by booking reference (no login) ----
+
+export type AppointmentStatus = "pending_approval" | "confirmed" | "completed" | "no_show" | "cancelled" | "rescheduled";
+
+export interface AppointmentLookup {
+  id: string;
+  status: AppointmentStatus;
+  service_id: string;
+  service_name: string;
+  scheduled_at: string;
+  end_at: string;
+  duration_minutes: number;
+  price_amount: number;
+  price_currency: string;
+  staff_member_id: string;
+  rescheduled_to_id: string | null;
+}
+
+export function getAppointmentByReference(appointmentId: string, bookingReference: string) {
+  const params = new URLSearchParams({ booking_reference: bookingReference });
+  return request(`/api/booking/appointments/${appointmentId}?${params.toString()}`) as Promise<{
+    appointment: AppointmentLookup;
+    can_self_service: boolean;
+    can_self_service_immediately: boolean;
+  }>;
+}
+
+export function clientCancelAppointment(appointmentId: string, bookingReference: string, reason?: string) {
+  return request(`/api/booking/appointments/${appointmentId}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ booking_reference: bookingReference, reason }),
+  }) as Promise<{ status: "cancelled" | "pending_staff_approval" }>;
+}
+
+export function clientRequestReschedule(
+  appointmentId: string,
+  bookingReference: string,
+  newStartAt: string,
+  newStaffMemberId?: string
+) {
+  return request(`/api/booking/appointments/${appointmentId}/reschedule`, {
+    method: "POST",
+    body: JSON.stringify({ booking_reference: bookingReference, new_start_at: newStartAt, new_staff_member_id: newStaffMemberId }),
+  }) as Promise<{ status: "rescheduled" | "pending_staff_approval"; new_appointment_id?: string }>;
+}
+
 // ---- Staff management (services, staff members, hours, capability) ----
 
 export async function staffListBookingServices() {
@@ -294,24 +340,106 @@ export interface StaffAppointmentRow {
   duration_minutes: number;
   price_amount: number;
   price_currency: string;
-  status: string;
+  status: AppointmentStatus;
   scheduled_at: string;
   end_at: string;
+  rescheduled_to_id: string | null;
 }
 
-export async function staffListAppointments(date?: string) {
+export async function staffListAppointments(date?: string, status?: AppointmentStatus) {
   const headers = await staffAuthHeader();
-  const params = date ? `?date=${encodeURIComponent(date)}` : "";
-  return request(`/api/staff/booking/appointments${params}`, { headers }) as Promise<{
+  const params = new URLSearchParams();
+  if (date) params.set("date", date);
+  if (status) params.set("status", status);
+  const query = params.toString();
+  return request(`/api/staff/booking/appointments${query ? `?${query}` : ""}`, { headers }) as Promise<{
     appointments: StaffAppointmentRow[];
   }>;
 }
 
-export async function staffCancelAppointment(id: string) {
+export async function staffApproveAppointment(id: string) {
   const headers = await staffAuthHeader();
-  return request(`/api/staff/booking/appointments/${id}/cancel`, { method: "PATCH", headers }) as Promise<{
-    cancelled: true;
+  return request(`/api/staff/booking/appointments/${id}/approve`, { method: "PATCH", headers }) as Promise<{
+    status: "confirmed";
   }>;
+}
+
+export async function staffCancelAppointment(id: string, reason?: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/appointments/${id}/cancel`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ reason }),
+  }) as Promise<{ status: "cancelled" }>;
+}
+
+export async function staffRescheduleAppointment(id: string, newStartAt: string, newStaffMemberId?: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/appointments/${id}/reschedule`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ new_start_at: newStartAt, new_staff_member_id: newStaffMemberId }),
+  }) as Promise<{ status: "rescheduled"; new_appointment_id: string }>;
+}
+
+export async function staffMarkCompleted(id: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/appointments/${id}/complete`, { method: "PATCH", headers }) as Promise<{
+    status: "completed";
+  }>;
+}
+
+export async function staffMarkNoShow(id: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/appointments/${id}/no-show`, { method: "PATCH", headers }) as Promise<{
+    status: "no_show";
+  }>;
+}
+
+export interface ChangeRequestRow {
+  id: string;
+  appointment_id: string;
+  request_type: "cancel" | "reschedule";
+  requested_start_at: string | null;
+  requested_staff_member_id: string | null;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  appointments: {
+    id: string;
+    client_id: string;
+    service_name: string;
+    scheduled_at: string;
+    end_at: string;
+    status: AppointmentStatus;
+  } | null;
+}
+
+export async function staffListChangeRequests(status: "pending" | "approved" | "rejected" = "pending") {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/change-requests?status=${encodeURIComponent(status)}`, { headers }) as Promise<{
+    changeRequests: ChangeRequestRow[];
+  }>;
+}
+
+export async function staffResolveChangeRequest(id: string, decision: "approve" | "reject") {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/booking/change-requests/${id}/resolve`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ decision }),
+  }) as Promise<{ resolved: "approve" | "reject" }>;
+}
+
+export interface ClientRecord {
+  client: { id: string; first_name: string; last_name: string; email: string; phone: string };
+  appointments: StaffAppointmentRow[];
+  consultations: { id: string; status: string; submitted_at: string | null; created_at: string }[];
+}
+
+export async function staffGetClientRecord(clientId: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/clients/${clientId}`, { headers }) as Promise<ClientRecord>;
 }
 
 export async function staffGetRevenueSummary(date?: string) {

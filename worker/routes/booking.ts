@@ -4,10 +4,20 @@ import { adminClient } from "../lib/supabase";
 import { recordAuditEvent } from "../lib/audit";
 import { toDayOfWeek, computeAvailableSlots } from "../lib/availability";
 import {
+  validateSlotSafeguards,
+  performCancel,
+  performReschedule,
+  isAtLeast24hBefore,
+  LifecycleError,
+} from "../lib/bookingLifecycle";
+import {
   availabilityQuerySchema,
   lookupOrCreateCustomerSchema,
   createAppointmentSchema,
   linkAppointmentToConsultationSchema,
+  appointmentReferenceQuerySchema,
+  clientCancelAppointmentSchema,
+  clientRequestRescheduleSchema,
 } from "../lib/bookingValidation";
 
 // Kaaya is the source of truth for all of this now — services, staff,
@@ -191,6 +201,17 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
 
   const startAt = new Date(input.start_at);
   const endAt = new Date(startAt.getTime() + service.duration_minutes * 60000);
+
+  // Re-validates the exact requested slot server-side -- the availability
+  // endpoint's slot list is the common-case UX, this is the actual gate.
+  const safeguardError = await validateSlotSafeguards(admin, {
+    serviceId: service.id,
+    staffMemberId: input.staff_member_id,
+    startAtIso: startAt.toISOString(),
+    endAtIso: endAt.toISOString(),
+  });
+  if (safeguardError) return errorResponse(safeguardError, 400);
+
   const idempotencyKey = crypto.randomUUID();
 
   const { data: appointment, error: appointmentError } = await admin
@@ -204,7 +225,7 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
       price_amount: service.price_amount,
       price_currency: service.price_currency,
       idempotency_key: idempotencyKey,
-      status: "scheduled",
+      status: "pending_approval",
       scheduled_at: startAt.toISOString(),
       end_at: endAt.toISOString(),
     })
@@ -300,4 +321,150 @@ export async function linkAppointmentToConsultation(
   });
 
   return json({ linked: true });
+}
+
+// Same self-verification pattern as linkAppointmentToConsultation above:
+// knowledge of booking_reference (the appointment's idempotency key) is the
+// only credential a client has, since there's no login for this flow.
+async function loadOwnedAppointment(admin: ReturnType<typeof adminClient>, appointmentId: string, bookingReference: string) {
+  const { data, error } = await admin
+    .from("appointments")
+    .select(
+      "id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, idempotency_key, rescheduled_to_id"
+    )
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (error) return { error: errorResponse(error.message, 500) };
+  if (!data || data.idempotency_key !== bookingReference) {
+    return { error: errorResponse("Appointment not found", 404) };
+  }
+  return { appointment: data };
+}
+
+export async function getAppointmentByReference(env: Env, url: URL, appointmentId: string): Promise<Response> {
+  const parsed = appointmentReferenceQuerySchema.safeParse({ booking_reference: url.searchParams.get("booking_reference") ?? "" });
+  if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+
+  const admin = adminClient(env);
+  const { appointment, error } = await loadOwnedAppointment(admin, appointmentId, parsed.data.booking_reference);
+  if (error) return error;
+
+  const canSelfService = ["pending_approval", "confirmed"].includes(appointment!.status);
+  return json({
+    appointment: {
+      id: appointment!.id,
+      status: appointment!.status,
+      service_id: appointment!.service_id,
+      service_name: appointment!.service_name,
+      scheduled_at: appointment!.scheduled_at,
+      end_at: appointment!.end_at,
+      duration_minutes: appointment!.duration_minutes,
+      price_amount: appointment!.price_amount,
+      price_currency: appointment!.price_currency,
+      staff_member_id: appointment!.staff_member_id,
+      rescheduled_to_id: appointment!.rescheduled_to_id,
+    },
+    can_self_service: canSelfService,
+    can_self_service_immediately: canSelfService && isAtLeast24hBefore(new Date().toISOString(), appointment!.scheduled_at),
+  });
+}
+
+export async function clientCancelAppointment(request: Request, env: Env, appointmentId: string): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("Invalid JSON body");
+  }
+  const parsed = clientCancelAppointmentSchema.safeParse(body);
+  if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+
+  const admin = adminClient(env);
+  const { appointment, error } = await loadOwnedAppointment(admin, appointmentId, parsed.data.booking_reference);
+  if (error) return error;
+
+  if (!["pending_approval", "confirmed"].includes(appointment!.status)) {
+    return errorResponse("This booking can no longer be cancelled.", 409);
+  }
+
+  const actor = { actorId: null, actorType: "client" as const };
+
+  if (isAtLeast24hBefore(new Date().toISOString(), appointment!.scheduled_at)) {
+    try {
+      await performCancel(admin, appointmentId, actor, parsed.data.reason ?? null);
+    } catch (e) {
+      if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
+      throw e;
+    }
+    return json({ status: "cancelled" });
+  }
+
+  const { error: insertError } = await admin.from("appointment_change_requests").insert({
+    appointment_id: appointmentId,
+    request_type: "cancel",
+    reason: parsed.data.reason ?? null,
+  });
+  if (insertError) return errorResponse(insertError.message, 500);
+
+  await recordAuditEvent(admin, {
+    appointment_id: appointmentId,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "change_requested",
+    metadata: { request_type: "cancel", reason: parsed.data.reason ?? null },
+  });
+  return json({ status: "pending_staff_approval" });
+}
+
+export async function clientRequestReschedule(request: Request, env: Env, appointmentId: string): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("Invalid JSON body");
+  }
+  const parsed = clientRequestRescheduleSchema.safeParse(body);
+  if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+
+  const admin = adminClient(env);
+  const { appointment, error } = await loadOwnedAppointment(admin, appointmentId, parsed.data.booking_reference);
+  if (error) return error;
+
+  if (!["pending_approval", "confirmed"].includes(appointment!.status)) {
+    return errorResponse("This booking can no longer be rescheduled.", 409);
+  }
+
+  const actor = { actorId: null, actorType: "client" as const };
+
+  if (isAtLeast24hBefore(new Date().toISOString(), appointment!.scheduled_at)) {
+    try {
+      const { newAppointmentId } = await performReschedule(admin, {
+        appointmentId,
+        actor,
+        newStartAtIso: parsed.data.new_start_at,
+        newStaffMemberId: parsed.data.new_staff_member_id,
+      });
+      return json({ status: "rescheduled", new_appointment_id: newAppointmentId });
+    } catch (e) {
+      if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
+      throw e;
+    }
+  }
+
+  const { error: insertError } = await admin.from("appointment_change_requests").insert({
+    appointment_id: appointmentId,
+    request_type: "reschedule",
+    requested_start_at: parsed.data.new_start_at,
+    requested_staff_member_id: parsed.data.new_staff_member_id ?? null,
+  });
+  if (insertError) return errorResponse(insertError.message, 500);
+
+  await recordAuditEvent(admin, {
+    appointment_id: appointmentId,
+    actor_id: null,
+    actor_type: "client",
+    event_type: "change_requested",
+    metadata: { request_type: "reschedule", requested_start_at: parsed.data.new_start_at },
+  });
+  return json({ status: "pending_staff_approval" });
 }

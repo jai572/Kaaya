@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { toDayOfWeek, londonWallTimeToUtcIso, computeAvailableSlots } from "./availability";
+import {
+  toDayOfWeek,
+  londonWallTimeToUtcIso,
+  londonDateIso,
+  computeAvailableSlots,
+  isWithinWorkingHours,
+} from "./availability";
 
 describe("toDayOfWeek", () => {
   it("matches known weekdays regardless of host timezone", () => {
@@ -18,6 +24,17 @@ describe("londonWallTimeToUtcIso", () => {
   it("resolves GMT (UTC+0) correctly in winter", () => {
     // 2026-01-15 09:00 London wall time is GMT -> 09:00 UTC.
     expect(londonWallTimeToUtcIso("2026-01-15", "09:00")).toBe("2026-01-15T09:00:00.000Z");
+  });
+});
+
+describe("londonDateIso", () => {
+  it("matches the UTC date when there's no offset (GMT, winter)", () => {
+    expect(londonDateIso("2026-01-15T09:00:00.000Z")).toBe("2026-01-15");
+  });
+
+  it("rolls over to the next London calendar date during BST near midnight UTC", () => {
+    // 2026-07-01 23:30 UTC is 2026-07-02 00:30 in London (BST, UTC+1).
+    expect(londonDateIso("2026-07-01T23:30:00.000Z")).toBe("2026-07-02");
   });
 });
 
@@ -75,5 +92,87 @@ describe("computeAvailableSlots", () => {
       nowIso: "2026-01-15T09:20:00.000Z",
     });
     expect(slots.map((s) => s.startAt)).toEqual(["2026-01-15T09:30:00.000Z", "2026-01-15T09:45:00.000Z"]);
+  });
+});
+
+describe("isWithinWorkingHours", () => {
+  const workingBlock = { startTime: "09:00", endTime: "17:00" };
+
+  it("returns false when there is no working block that day", () => {
+    expect(
+      isWithinWorkingHours({
+        dateIso: "2026-01-15",
+        startAtIso: "2026-01-15T10:00:00.000Z",
+        endAtIso: "2026-01-15T10:30:00.000Z",
+        workingBlock: null,
+      })
+    ).toBe(false);
+  });
+
+  it("returns true for an interval fully inside the working block", () => {
+    expect(
+      isWithinWorkingHours({
+        dateIso: "2026-01-15",
+        startAtIso: "2026-01-15T10:00:00.000Z",
+        endAtIso: "2026-01-15T10:30:00.000Z",
+        workingBlock,
+      })
+    ).toBe(true);
+  });
+
+  it("returns false when the interval starts before the working block opens", () => {
+    expect(
+      isWithinWorkingHours({
+        dateIso: "2026-01-15",
+        startAtIso: "2026-01-15T08:45:00.000Z",
+        endAtIso: "2026-01-15T09:15:00.000Z",
+        workingBlock,
+      })
+    ).toBe(false);
+  });
+
+  it("returns true for an interval starting exactly at opening time", () => {
+    expect(
+      isWithinWorkingHours({
+        dateIso: "2026-01-15",
+        startAtIso: "2026-01-15T09:00:00.000Z",
+        endAtIso: "2026-01-15T09:30:00.000Z",
+        workingBlock,
+      })
+    ).toBe(true);
+  });
+
+  it("returns true for an interval ending exactly at closing time", () => {
+    expect(
+      isWithinWorkingHours({
+        dateIso: "2026-01-15",
+        startAtIso: "2026-01-15T16:30:00.000Z",
+        endAtIso: "2026-01-15T17:00:00.000Z",
+        workingBlock,
+      })
+    ).toBe(true);
+  });
+
+  it("returns false when the interval ends after the working block closes", () => {
+    expect(
+      isWithinWorkingHours({
+        dateIso: "2026-01-15",
+        startAtIso: "2026-01-15T16:45:00.000Z",
+        endAtIso: "2026-01-15T17:15:00.000Z",
+        workingBlock,
+      })
+    ).toBe(false);
+  });
+
+  it("returns false for a slot that has already passed", () => {
+    expect(
+      isWithinWorkingHours({
+        dateIso: "2026-01-15",
+        startAtIso: "2026-01-15T10:00:00.000Z",
+        endAtIso: "2026-01-15T10:30:00.000Z",
+        workingBlock,
+        nowIso: "2026-01-15T10:05:00.000Z",
+      })
+    ).toBe(false);
   });
 });
