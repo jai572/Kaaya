@@ -145,6 +145,7 @@ button {
 .kaaya-field input[type="text"],
 .kaaya-field input[type="email"],
 .kaaya-field input[type="tel"],
+.kaaya-field input[type="password"],
 .kaaya-field input[type="date"],
 .kaaya-field input[type="time"],
 .kaaya-field input[type="number"],

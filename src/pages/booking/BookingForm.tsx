@@ -10,7 +10,13 @@ import {
   type StaffMember,
   type AvailabilitySlot,
 } from "../../lib/api";
-import { formatMoney, formatDuration, todayIso, filterSlotsByStaffMember } from "../../lib/bookingFormat";
+import {
+  formatMoney,
+  formatDuration,
+  todayIso,
+  filterSlotsByStaffMember,
+  groupServicesByCategory,
+} from "../../lib/bookingFormat";
 
 const STEPS = ["service", "date", "time", "contact", "summary"] as const;
 type Step = (typeof STEPS)[number];
@@ -24,6 +30,7 @@ export default function BookingForm() {
   const [servicesLoading, setServicesLoading] = useState(true);
   const [servicesError, setServicesError] = useState<string | null>(null);
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [selectedCategorySlug, setSelectedCategorySlug] = useState<string | null>(null);
 
   const [date, setDate] = useState(todayIso());
 
@@ -48,6 +55,19 @@ export default function BookingForm() {
 
   const selectedService = services.find((s) => s.id === selectedServiceId) ?? null;
   const bookableOnline = !!selectedService?.duration_minutes;
+
+  const categoryGroups = useMemo(() => groupServicesByCategory(services), [services]);
+  const selectedCategory = categoryGroups.find((g) => g.slug === selectedCategorySlug) ?? null;
+
+  function openCategory(slug: string) {
+    setSelectedCategorySlug(slug);
+    setSelectedServiceId(null);
+  }
+
+  function backToCategories() {
+    setSelectedCategorySlug(null);
+    setSelectedServiceId(null);
+  }
 
   useEffect(() => {
     if (!selectedServiceId) return;
@@ -160,33 +180,61 @@ export default function BookingForm() {
 
       {step === "service" && (
         <div className="kaaya-card">
-          <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>Choose a treatment.</p>
           {servicesLoading && <p>Loading treatments…</p>}
           {servicesError && <p className="kaaya-error">{servicesError}</p>}
           {!servicesLoading && !servicesError && services.length === 0 && (
             <p>No treatments are available online right now — please call to book.</p>
           )}
-          {!servicesLoading &&
-            !servicesError &&
-            services.map((s) => (
+
+          {!servicesLoading && !servicesError && services.length > 0 && !selectedCategory && (
+            <>
+              <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>Choose a category.</p>
+              {categoryGroups.map((g) => (
+                <div
+                  key={g.slug}
+                  className="kaaya-treatment-option"
+                  style={{ justifyContent: "space-between" }}
+                  onClick={() => openCategory(g.slug)}
+                >
+                  <span>{g.label}</span>
+                  <span style={{ color: "var(--kaaya-text-muted)", fontSize: "0.85rem" }}>
+                    {g.services.length} treatment{g.services.length === 1 ? "" : "s"} →
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {!servicesLoading && !servicesError && selectedCategory && (
+            <>
               <div
-                key={s.id}
-                className="kaaya-treatment-option"
-                data-selected={selectedServiceId === s.id}
-                onClick={() => setSelectedServiceId(s.id)}
+                style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, cursor: "pointer" }}
+                onClick={backToCategories}
               >
-                <input type="radio" checked={selectedServiceId === s.id} readOnly />
-                <span>
-                  {s.name}
-                  <br />
-                  <small style={{ color: "var(--kaaya-text-muted)" }}>
-                    {s.price_is_from ? "from " : ""}
-                    {formatMoney(s.price_amount, s.price_currency)}
-                    {s.duration_minutes ? ` · ${formatDuration(s.duration_minutes)}` : " · call to book"}
-                  </small>
-                </span>
+                <span style={{ color: "var(--kaaya-accent)", fontWeight: 600 }}>← All categories</span>
               </div>
-            ))}
+              <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>{selectedCategory.label}</p>
+              {selectedCategory.services.map((s) => (
+                <div
+                  key={s.id}
+                  className="kaaya-treatment-option"
+                  data-selected={selectedServiceId === s.id}
+                  onClick={() => setSelectedServiceId(s.id)}
+                >
+                  <input type="radio" checked={selectedServiceId === s.id} readOnly />
+                  <span>
+                    {s.name}
+                    <br />
+                    <small style={{ color: "var(--kaaya-text-muted)" }}>
+                      {s.price_is_from ? "from " : ""}
+                      {formatMoney(s.price_amount, s.price_currency)}
+                      {s.duration_minutes ? ` · ${formatDuration(s.duration_minutes)}` : " · call to book"}
+                    </small>
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
 

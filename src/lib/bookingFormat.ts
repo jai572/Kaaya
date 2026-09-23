@@ -27,3 +27,59 @@ export function filterSlotsByStaffMember<T extends { staffMemberId: string }>(
 ): T[] {
   return staffMemberId ? slots.filter((s) => s.staffMemberId === staffMemberId) : slots;
 }
+
+// Booking Step 1's category cards. Grouped by the services table's real
+// category_slug values (confirmed live: threading, waxing, nails, shellac,
+// vinylux, lash-lift, eyelash-extensions, patch-test) -- not the leaflet's
+// old categories, which include a "Tinting" bucket with no real catalog
+// items behind it any more. Nails/shellac/vinylux merge into one "Nails"
+// card per business decision; every other DB category_slug gets its own.
+export type BookingCategoryGroup = {
+  slug: string;
+  label: string;
+};
+
+export const BOOKING_CATEGORY_GROUPS: BookingCategoryGroup[] = [
+  { slug: "threading", label: "Threading" },
+  { slug: "waxing", label: "Waxing" },
+  { slug: "nails", label: "Nails" },
+  { slug: "lash-lift", label: "Lash Lift & Curl" },
+  { slug: "eyelash-extensions", label: "Eyelash Extensions" },
+  { slug: "patch-test", label: "Patch Test" },
+];
+
+// Which raw category_slug values fold into which card. Anything not listed
+// here falls into a catch-all "Other" card rather than silently vanishing
+// from the booking flow if a new category is ever added in Staff > Services.
+const CATEGORY_SLUG_MAP: Record<string, string> = {
+  threading: "threading",
+  waxing: "waxing",
+  nails: "nails",
+  shellac: "nails",
+  vinylux: "nails",
+  "lash-lift": "lash-lift",
+  "eyelash-extensions": "eyelash-extensions",
+  "patch-test": "patch-test",
+};
+
+export function groupServicesByCategory<T extends { category_slug: string }>(
+  services: T[]
+): { slug: string; label: string; services: T[] }[] {
+  const bySlug = new Map<string, T[]>();
+  for (const service of services) {
+    const groupSlug = CATEGORY_SLUG_MAP[service.category_slug] ?? "other";
+    const existing = bySlug.get(groupSlug);
+    if (existing) existing.push(service);
+    else bySlug.set(groupSlug, [service]);
+  }
+
+  const groups = BOOKING_CATEGORY_GROUPS.filter((g) => bySlug.has(g.slug)).map((g) => ({
+    ...g,
+    services: bySlug.get(g.slug)!,
+  }));
+
+  const other = bySlug.get("other");
+  if (other) groups.push({ slug: "other", label: "Other", services: other });
+
+  return groups;
+}
