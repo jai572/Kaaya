@@ -33,6 +33,25 @@ export function assertTransition(current: AppointmentStatus, next: AppointmentSt
   }
 }
 
+/** Statuses that no longer occupy their scheduled slot. Mirrors the DB
+ * exclusion constraint's WHERE clause (migration 015) -- kept here as the
+ * one shared source of truth so every booked-interval query (availability,
+ * revenue, etc.) excludes the same set instead of drifting independently. */
+export const NON_BLOCKING_STATUSES: AppointmentStatus[] = ["cancelled", "rescheduled"];
+
+/** Sums price_amount for rows that still represent real, current revenue --
+ * excludes NON_BLOCKING_STATUSES so a rescheduled-away row (which kept its
+ * original scheduled_at/price_amount as history) never counts a second time
+ * against the date it was moved away from, while the new row it points to
+ * counts once, on its own date. Applied in application code (in addition to
+ * the DB-level query filter) so this stays independently testable and acts
+ * as a second line of defense if the query filter is ever changed. */
+export function sumAppointmentRevenue(rows: { status: AppointmentStatus; price_amount: number | null }[]): number {
+  return rows
+    .filter((row) => !NON_BLOCKING_STATUSES.includes(row.status))
+    .reduce((sum, row) => sum + (row.price_amount ?? 0), 0);
+}
+
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 /** Client self-service cutoff: true when the appointment is at least 24h

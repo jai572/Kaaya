@@ -9,6 +9,7 @@ import {
   performReschedule,
   isAtLeast24hBefore,
   LifecycleError,
+  NON_BLOCKING_STATUSES,
 } from "../lib/bookingLifecycle";
 import {
   availabilityQuerySchema,
@@ -110,7 +111,7 @@ export async function getAvailability(env: Env, url: URL): Promise<Response> {
       .from("appointments")
       .select("scheduled_at, end_at")
       .eq("staff_member_id", member.id)
-      .neq("status", "cancelled")
+      .not("status", "in", `(${NON_BLOCKING_STATUSES.join(",")})`)
       .gte("scheduled_at", dayStart)
       .lte("scheduled_at", dayEnd);
     if (bookedError) return errorResponse(bookedError.message, 500);
@@ -326,12 +327,13 @@ export async function linkAppointmentToConsultation(
 // Same self-verification pattern as linkAppointmentToConsultation above:
 // knowledge of booking_reference (the appointment's idempotency key) is the
 // only credential a client has, since there's no login for this flow.
+const APPOINTMENT_LOOKUP_COLUMNS =
+  "id, client_id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, idempotency_key, rescheduled_to_id";
+
 async function loadOwnedAppointment(admin: ReturnType<typeof adminClient>, appointmentId: string, bookingReference: string) {
   const { data, error } = await admin
     .from("appointments")
-    .select(
-      "id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, idempotency_key, rescheduled_to_id"
-    )
+    .select(APPOINTMENT_LOOKUP_COLUMNS)
     .eq("id", appointmentId)
     .maybeSingle();
   if (error) return { error: errorResponse(error.message, 500) };
@@ -350,18 +352,24 @@ async function loadOwnedAppointment(admin: ReturnType<typeof adminClient>, appoi
 async function resolveCurrentAppointment(admin: ReturnType<typeof adminClient>, appointmentId: string, bookingReference: string) {
   const { appointment, error } = await loadOwnedAppointment(admin, appointmentId, bookingReference);
   if (error) return { error };
+  const ownerClientId = appointment!.client_id;
   let current = appointment!;
   const seen = new Set([current.id]);
   while (current.status === "rescheduled" && current.rescheduled_to_id && !seen.has(current.rescheduled_to_id)) {
     const { data: next, error: nextError } = await admin
       .from("appointments")
-      .select(
-        "id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, idempotency_key, rescheduled_to_id"
-      )
+      .select(APPOINTMENT_LOOKUP_COLUMNS)
       .eq("id", current.rescheduled_to_id)
       .maybeSingle();
     if (nextError) return { error: errorResponse(nextError.message, 500) };
     if (!next) break;
+    // Defense in depth: every hop must belong to the same client as the
+    // original reference-verified row. performReschedule always copies
+    // client_id onto the new row, so this never legitimately differs --
+    // if it ever does, treat the chain as broken rather than follow it.
+    if (next.client_id !== ownerClientId) {
+      return { error: errorResponse("Appointment not found", 404) };
+    }
     seen.add(next.id);
     current = next;
   }

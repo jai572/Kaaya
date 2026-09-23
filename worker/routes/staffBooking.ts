@@ -10,6 +10,8 @@ import {
   performNoShow,
   performReschedule,
   LifecycleError,
+  NON_BLOCKING_STATUSES,
+  sumAppointmentRevenue,
 } from "../lib/bookingLifecycle";
 import {
   createServiceSchema,
@@ -555,13 +557,13 @@ export async function getRevenueSummary(request: Request, env: Env, url: URL): P
     const admin = adminClient(env);
     const { data, error } = await admin
       .from("appointments")
-      .select("price_amount")
-      .neq("status", "cancelled")
+      .select("status, price_amount")
+      .not("status", "in", `(${NON_BLOCKING_STATUSES.join(",")})`)
       .gte("scheduled_at", `${date}T00:00:00.000Z`)
       .lte("scheduled_at", `${date}T23:59:59.999Z`);
     if (error) return errorResponse(error.message, 500);
 
-    const total = (data ?? []).reduce((sum, row) => sum + (row.price_amount ?? 0), 0);
+    const total = sumAppointmentRevenue(data ?? []);
     return json({ date, total_amount: total, currency: "GBP", appointment_count: data?.length ?? 0 });
   });
 }
