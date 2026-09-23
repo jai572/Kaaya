@@ -377,13 +377,7 @@ export default function StaffConsultationDetail() {
         <form onSubmit={handleDecision}>
           <div className="kaaya-field">
             <label htmlFor="decision">Decision</label>
-            <select
-              id="decision"
-              value={decision}
-              onChange={(e) => setDecision(e.target.value)}
-              required
-              style={{ width: "100%", padding: 14, borderRadius: 10, border: "1px solid var(--kaaya-border)" }}
-            >
+            <select id="decision" value={decision} onChange={(e) => setDecision(e.target.value)} required>
               <option value="" disabled>
                 Select a decision
               </option>

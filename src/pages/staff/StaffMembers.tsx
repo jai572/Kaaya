@@ -150,6 +150,8 @@ export default function StaffMembers() {
                       <span style={{ width: 90 }}>{DAY_LABELS[block.day_of_week]}</span>
                       <input
                         type="time"
+                        className="kaaya-input"
+                        style={{ width: 130 }}
                         value={block.start_time ?? ""}
                         onChange={(e) =>
                           setWeek((w) =>
@@ -160,6 +162,8 @@ export default function StaffMembers() {
                       <span>to</span>
                       <input
                         type="time"
+                        className="kaaya-input"
+                        style={{ width: 130 }}
                         value={block.end_time ?? ""}
                         onChange={(e) =>
                           setWeek((w) =>
