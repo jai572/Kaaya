@@ -19,6 +19,7 @@ export default function ManageBooking() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const [reference, setReference] = useState("");
   const [appointment, setAppointment] = useState<AppointmentLookup | null>(null);
+  const [resolvedFromOriginal, setResolvedFromOriginal] = useState(false);
   const [canSelfServiceImmediately, setCanSelfServiceImmediately] = useState(false);
   const [view, setView] = useState<View>("lookup");
   const [loading, setLoading] = useState(false);
@@ -44,6 +45,7 @@ export default function ManageBooking() {
     try {
       const res = await getAppointmentByReference(appointmentId!, reference.trim());
       setAppointment(res.appointment);
+      setResolvedFromOriginal(res.resolved_from_original);
       setCanSelfServiceImmediately(res.can_self_service_immediately);
       setView("status");
     } catch (e) {
@@ -138,6 +140,10 @@ export default function ManageBooking() {
         <h1>Kaaya</h1>
         <p>Your booking</p>
       </div>
+
+      {resolvedFromOriginal && (
+        <div className="kaaya-notice">This booking was rescheduled — showing your current appointment.</div>
+      )}
 
       <div className="kaaya-card">
         <table className="kaaya-table">

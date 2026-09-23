@@ -193,6 +193,7 @@ export function getAppointmentByReference(appointmentId: string, bookingReferenc
   const params = new URLSearchParams({ booking_reference: bookingReference });
   return request(`/api/booking/appointments/${appointmentId}?${params.toString()}`) as Promise<{
     appointment: AppointmentLookup;
+    resolved_from_original: boolean;
     can_self_service: boolean;
     can_self_service_immediately: boolean;
   }>;

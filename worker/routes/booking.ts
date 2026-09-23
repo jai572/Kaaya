@@ -341,12 +341,39 @@ async function loadOwnedAppointment(admin: ReturnType<typeof adminClient>, appoi
   return { appointment: data };
 }
 
+// A client only ever has the reference from their *original* booking -- if
+// staff (or the client themselves) later reschedules it, that original link
+// is the only way back in. Follows rescheduled_to_id forward to whichever
+// appointment is actually current, using the original reference as
+// continued proof of ownership (client_id is preserved on every hop by
+// performReschedule, so the chain never crosses to someone else's booking).
+async function resolveCurrentAppointment(admin: ReturnType<typeof adminClient>, appointmentId: string, bookingReference: string) {
+  const { appointment, error } = await loadOwnedAppointment(admin, appointmentId, bookingReference);
+  if (error) return { error };
+  let current = appointment!;
+  const seen = new Set([current.id]);
+  while (current.status === "rescheduled" && current.rescheduled_to_id && !seen.has(current.rescheduled_to_id)) {
+    const { data: next, error: nextError } = await admin
+      .from("appointments")
+      .select(
+        "id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, idempotency_key, rescheduled_to_id"
+      )
+      .eq("id", current.rescheduled_to_id)
+      .maybeSingle();
+    if (nextError) return { error: errorResponse(nextError.message, 500) };
+    if (!next) break;
+    seen.add(next.id);
+    current = next;
+  }
+  return { appointment: current, resolvedFromOriginal: current.id !== appointment!.id };
+}
+
 export async function getAppointmentByReference(env: Env, url: URL, appointmentId: string): Promise<Response> {
   const parsed = appointmentReferenceQuerySchema.safeParse({ booking_reference: url.searchParams.get("booking_reference") ?? "" });
   if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
 
   const admin = adminClient(env);
-  const { appointment, error } = await loadOwnedAppointment(admin, appointmentId, parsed.data.booking_reference);
+  const { appointment, error, resolvedFromOriginal } = await resolveCurrentAppointment(admin, appointmentId, parsed.data.booking_reference);
   if (error) return error;
 
   const canSelfService = ["pending_approval", "confirmed"].includes(appointment!.status);
@@ -364,6 +391,7 @@ export async function getAppointmentByReference(env: Env, url: URL, appointmentI
       staff_member_id: appointment!.staff_member_id,
       rescheduled_to_id: appointment!.rescheduled_to_id,
     },
+    resolved_from_original: resolvedFromOriginal ?? false,
     can_self_service: canSelfService,
     can_self_service_immediately: canSelfService && isAtLeast24hBefore(new Date().toISOString(), appointment!.scheduled_at),
   });
@@ -380,8 +408,9 @@ export async function clientCancelAppointment(request: Request, env: Env, appoin
   if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
 
   const admin = adminClient(env);
-  const { appointment, error } = await loadOwnedAppointment(admin, appointmentId, parsed.data.booking_reference);
+  const { appointment, error } = await resolveCurrentAppointment(admin, appointmentId, parsed.data.booking_reference);
   if (error) return error;
+  const currentId = appointment!.id;
 
   if (!["pending_approval", "confirmed"].includes(appointment!.status)) {
     return errorResponse("This booking can no longer be cancelled.", 409);
@@ -391,7 +420,7 @@ export async function clientCancelAppointment(request: Request, env: Env, appoin
 
   if (isAtLeast24hBefore(new Date().toISOString(), appointment!.scheduled_at)) {
     try {
-      await performCancel(admin, appointmentId, actor, parsed.data.reason ?? null);
+      await performCancel(admin, currentId, actor, parsed.data.reason ?? null);
     } catch (e) {
       if (e instanceof LifecycleError) return errorResponse(e.message, e.status);
       throw e;
@@ -400,14 +429,14 @@ export async function clientCancelAppointment(request: Request, env: Env, appoin
   }
 
   const { error: insertError } = await admin.from("appointment_change_requests").insert({
-    appointment_id: appointmentId,
+    appointment_id: currentId,
     request_type: "cancel",
     reason: parsed.data.reason ?? null,
   });
   if (insertError) return errorResponse(insertError.message, 500);
 
   await recordAuditEvent(admin, {
-    appointment_id: appointmentId,
+    appointment_id: currentId,
     actor_id: null,
     actor_type: "client",
     event_type: "change_requested",
@@ -427,8 +456,9 @@ export async function clientRequestReschedule(request: Request, env: Env, appoin
   if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
 
   const admin = adminClient(env);
-  const { appointment, error } = await loadOwnedAppointment(admin, appointmentId, parsed.data.booking_reference);
+  const { appointment, error } = await resolveCurrentAppointment(admin, appointmentId, parsed.data.booking_reference);
   if (error) return error;
+  const currentId = appointment!.id;
 
   if (!["pending_approval", "confirmed"].includes(appointment!.status)) {
     return errorResponse("This booking can no longer be rescheduled.", 409);
@@ -439,7 +469,7 @@ export async function clientRequestReschedule(request: Request, env: Env, appoin
   if (isAtLeast24hBefore(new Date().toISOString(), appointment!.scheduled_at)) {
     try {
       const { newAppointmentId } = await performReschedule(admin, {
-        appointmentId,
+        appointmentId: currentId,
         actor,
         newStartAtIso: parsed.data.new_start_at,
         newStaffMemberId: parsed.data.new_staff_member_id,
@@ -452,7 +482,7 @@ export async function clientRequestReschedule(request: Request, env: Env, appoin
   }
 
   const { error: insertError } = await admin.from("appointment_change_requests").insert({
-    appointment_id: appointmentId,
+    appointment_id: currentId,
     request_type: "reschedule",
     requested_start_at: parsed.data.new_start_at,
     requested_staff_member_id: parsed.data.new_staff_member_id ?? null,
@@ -460,7 +490,7 @@ export async function clientRequestReschedule(request: Request, env: Env, appoin
   if (insertError) return errorResponse(insertError.message, 500);
 
   await recordAuditEvent(admin, {
-    appointment_id: appointmentId,
+    appointment_id: currentId,
     actor_id: null,
     actor_type: "client",
     event_type: "change_requested",
