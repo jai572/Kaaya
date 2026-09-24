@@ -49,10 +49,6 @@ export default function StaffConsultationList() {
       <div className="kaaya-header">
         <h1>Kaaya — Consultations</h1>
       </div>
-      <p>
-        <Link to="/staff/services">Services</Link> · <Link to="/staff/staff-members">Staff members</Link> ·{" "}
-        <Link to="/staff/bookings">Bookings</Link> · <Link to="/staff/permissions">Permissions</Link>
-      </p>
       {error && <p className="kaaya-error">{error}</p>}
       {rows && (
         <div className="kaaya-card">

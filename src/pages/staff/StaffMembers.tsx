@@ -1,202 +1,270 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { supabase } from "../../lib/supabaseClient";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   staffListStaffMembers,
   staffCreateStaffMember,
   staffUpdateStaffMember,
-  staffGetStaffWorkingHours,
-  staffSetStaffWorkingHours,
+  staffListBookingServices,
+  staffListServiceStaffLinks,
+  staffSetStaffServices,
+  staffGetRota,
+  staffListLocations,
+  type BookableService,
   type StaffMemberRow,
-  type WorkingHoursBlock,
+  type RotaHoursRow,
+  type LocationRow,
 } from "../../lib/api";
+import { STAFF_COLOURS, categoryLabel, nextFreeColour } from "../../lib/staffFormat";
+import { Drawer, PageHead, Switch, errorMessage } from "../../components/staff/ui";
 
-const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-function emptyWeek(): WorkingHoursBlock[] {
-  return DAY_LABELS.map((_, day_of_week) => ({ day_of_week, start_time: null, end_time: null }));
-}
+type Form = {
+  id: string | null;
+  name: string;
+  colour: string;
+  active: boolean;
+  serviceIds: string[];
+};
 
 export default function StaffMembers() {
-  const navigate = useNavigate();
-  const [staffMembers, setStaffMembers] = useState<StaffMemberRow[] | null>(null);
+  const [staff, setStaff] = useState<StaffMemberRow[] | null>(null);
+  const [services, setServices] = useState<BookableService[]>([]);
+  const [links, setLinks] = useState<{ service_id: string; staff_member_id: string }[]>([]);
+  const [rota, setRota] = useState<RotaHoursRow[]>([]);
+  const [locations, setLocations] = useState<LocationRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [week, setWeek] = useState<WorkingHoursBlock[]>(emptyWeek());
-  const [savingHours, setSavingHours] = useState(false);
+  const [form, setForm] = useState<Form | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  function load() {
-    staffListStaffMembers()
-      .then((res) => setStaffMembers(res.staffMembers))
-      .catch((e) => setError(e instanceof Error ? e.message : "Could not load staff members"));
-  }
+  const load = useCallback(async () => {
+    try {
+      const [st, svc, ln, rt, lc] = await Promise.all([
+        staffListStaffMembers(),
+        staffListBookingServices(),
+        staffListServiceStaffLinks(),
+        staffGetRota(),
+        staffListLocations(),
+      ]);
+      setStaff(st.staffMembers);
+      setServices(svc.services.filter((s) => s.active !== false));
+      setLinks(ln.links);
+      setRota(rt.hours);
+      setLocations(lc.locations);
+    } catch (e) {
+      setError(errorMessage(e, "Could not load staff"));
+    }
+  }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        navigate("/staff/login");
-        return;
-      }
-      load();
+    load();
+  }, [load]);
+
+  const serviceGroups = useMemo(() => {
+    const cats = [...new Set(services.map((s) => s.category_slug))].sort((a, b) => categoryLabel(a).localeCompare(categoryLabel(b)));
+    return cats.map((c) => ({
+      slug: c,
+      items: services.filter((s) => s.category_slug === c).sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name)),
+    }));
+  }, [services]);
+
+  const locationName = useMemo(() => new Map(locations.map((l) => [l.id, l.name])), [locations]);
+
+  function worksAt(staffId: string): string {
+    const ids = [...new Set(rota.filter((r) => r.staff_member_id === staffId && r.location_id).map((r) => r.location_id as string))];
+    if (ids.length === 0) return "Not on the rota";
+    return ids.map((id) => locationName.get(id) ?? "Unknown").join(", ");
+  }
+
+  function openNew() {
+    setForm({ id: null, name: "", colour: nextFreeColour((staff ?? []).map((m) => m.colour)), active: true, serviceIds: [] });
+    setFormError(null);
+  }
+
+  function openEdit(m: StaffMemberRow) {
+    setForm({
+      id: m.id,
+      name: m.display_name,
+      colour: m.colour ?? nextFreeColour((staff ?? []).filter((x) => x.id !== m.id).map((x) => x.colour)),
+      active: m.active,
+      serviceIds: links.filter((l) => l.staff_member_id === m.id).map((l) => l.service_id),
     });
-  }, [navigate]);
+    setFormError(null);
+  }
 
-  async function createStaffMember() {
-    if (!newName.trim()) return;
-    setCreating(true);
-    setError(null);
+  function toggleService(id: string) {
+    if (!form) return;
+    setForm({ ...form, serviceIds: form.serviceIds.includes(id) ? form.serviceIds.filter((x) => x !== id) : [...form.serviceIds, id] });
+  }
+
+  function toggleGroup(ids: string[], allOn: boolean) {
+    if (!form) return;
+    const set = new Set(form.serviceIds);
+    ids.forEach((id) => (allOn ? set.delete(id) : set.add(id)));
+    setForm({ ...form, serviceIds: [...set] });
+  }
+
+  async function save() {
+    if (!form) return;
+    if (!form.name.trim()) return setFormError("Enter a name.");
+    setSaving(true);
+    setFormError(null);
     try {
-      await staffCreateStaffMember({ display_name: newName.trim() });
-      setNewName("");
-      load();
+      let id = form.id;
+      if (id) {
+        await staffUpdateStaffMember(id, { display_name: form.name.trim(), colour: form.colour, active: form.active });
+      } else {
+        id = (await staffCreateStaffMember({ display_name: form.name.trim(), colour: form.colour })).id;
+      }
+      await staffSetStaffServices(id, form.serviceIds);
+      setForm(null);
+      await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create staff member");
+      setFormError(errorMessage(e, "Could not save staff member"));
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   }
 
-  async function toggleActive(member: StaffMemberRow) {
-    try {
-      await staffUpdateStaffMember(member.id, { active: !member.active });
-      load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not update staff member");
-    }
-  }
-
-  async function openHours(memberId: string) {
-    if (expandedId === memberId) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(memberId);
-    try {
-      const { hours } = await staffGetStaffWorkingHours(memberId);
-      const byDay = new Map(hours.map((h) => [h.day_of_week, h]));
-      setWeek(
-        DAY_LABELS.map((_, day_of_week) => {
-          const existing = byDay.get(day_of_week);
-          return { day_of_week, start_time: existing?.start_time ?? null, end_time: existing?.end_time ?? null };
-        })
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load working hours");
-    }
-  }
-
-  async function saveHours(memberId: string) {
-    setSavingHours(true);
-    setError(null);
-    try {
-      await staffSetStaffWorkingHours(memberId, week);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save working hours");
-    } finally {
-      setSavingHours(false);
-    }
-  }
+  const usedColours = new Map((staff ?? []).filter((m) => m.id !== form?.id && m.colour).map((m) => [m.colour!.toLowerCase(), m.display_name]));
 
   return (
-    <div className="kaaya-shell kaaya-shell--wide">
-      <div className="kaaya-header">
-        <h1>Kaaya — Staff members</h1>
-        <p>Therapists who perform treatments, and their weekly working hours.</p>
-      </div>
+    <div className="st-page">
+      <PageHead
+        title="Staff"
+        subtitle="Who works here, their calendar colour and which treatments they do. Hours and locations are on the Rota."
+        actions={
+          <button type="button" className="st-btn" onClick={openNew}>
+            + Add staff member
+          </button>
+        }
+      />
 
-      <p>
-        <Link to="/staff">← Back to consultations</Link> · <Link to="/staff/services">Services</Link> ·{" "}
-        <Link to="/staff/bookings">Bookings</Link>
-      </p>
+      {error && <div className="st-error" role="alert">{error}</div>}
 
-      {error && <p className="kaaya-error">{error}</p>}
-
-      <div className="kaaya-card">
-        <h2 style={{ marginTop: 0, fontSize: "1rem" }}>Add a staff member</h2>
-        <div className="kaaya-field">
-          <label htmlFor="new-staff-name">Display name</label>
-          <input id="new-staff-name" type="text" value={newName} onChange={(e) => setNewName(e.target.value)} />
-        </div>
-        <button type="button" className="kaaya-btn kaaya-btn--secondary" disabled={creating} onClick={createStaffMember}>
-          {creating ? "Adding…" : "Add staff member"}
-        </button>
-      </div>
-
-      {staffMembers && (
-        <div className="kaaya-card">
-          {staffMembers.map((member) => (
-            <div key={member.id} style={{ borderBottom: "1px solid var(--kaaya-border)", padding: "14px 0" }}>
-              <strong>{member.display_name}</strong>
-              {!member.active && (
-                <span className="kaaya-badge kaaya-badge--INFORMATION" style={{ marginLeft: 8 }}>
-                  Inactive
-                </span>
-              )}
-              <div className="kaaya-btn-row" style={{ marginTop: 8 }}>
-                <button type="button" className="kaaya-btn kaaya-btn--secondary" onClick={() => openHours(member.id)}>
-                  {expandedId === member.id ? "Hide hours" : "Edit working hours"}
-                </button>
-                <button type="button" className="kaaya-btn kaaya-btn--secondary" onClick={() => toggleActive(member)}>
-                  {member.active ? "Deactivate" : "Reactivate"}
-                </button>
-              </div>
-
-              {expandedId === member.id && (
-                <div style={{ marginTop: 12 }}>
-                  {week.map((block) => (
-                    <div key={block.day_of_week} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                      <span style={{ width: 90 }}>{DAY_LABELS[block.day_of_week]}</span>
-                      <input
-                        type="time"
-                        className="kaaya-input"
-                        style={{ width: 130 }}
-                        value={block.start_time ?? ""}
-                        onChange={(e) =>
-                          setWeek((w) =>
-                            w.map((b) => (b.day_of_week === block.day_of_week ? { ...b, start_time: e.target.value || null } : b))
-                          )
-                        }
-                      />
-                      <span>to</span>
-                      <input
-                        type="time"
-                        className="kaaya-input"
-                        style={{ width: 130 }}
-                        value={block.end_time ?? ""}
-                        onChange={(e) =>
-                          setWeek((w) =>
-                            w.map((b) => (b.day_of_week === block.day_of_week ? { ...b, end_time: e.target.value || null } : b))
-                          )
-                        }
-                      />
-                      <button
-                        type="button"
-                        className="kaaya-btn kaaya-btn--secondary"
-                        onClick={() =>
-                          setWeek((w) =>
-                            w.map((b) => (b.day_of_week === block.day_of_week ? { ...b, start_time: null, end_time: null } : b))
-                          )
-                        }
-                      >
-                        Not working
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="kaaya-btn"
-                    disabled={savingHours}
-                    onClick={() => saveHours(member.id)}
+      <div className="st-card st-table-wrap">
+        {staff === null ? (
+          <div className="st-empty">Loading…</div>
+        ) : staff.length === 0 ? (
+          <div className="st-empty">No staff yet. Add the first one.</div>
+        ) : (
+          <table className="st-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Treatments</th>
+                <th>Works at</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {staff.map((m) => {
+                const count = links.filter((l) => l.staff_member_id === m.id).length;
+                return (
+                  <tr
+                    key={m.id}
+                    className="st-clickable"
+                    tabIndex={0}
+                    onClick={() => openEdit(m)}
+                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openEdit(m))}
                   >
-                    {savingHours ? "Saving…" : "Save hours"}
-                  </button>
-                </div>
-              )}
+                    <td>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                        <span className="st-dot" style={{ ["--dot" as string]: m.colour ?? undefined, width: 16, height: 16 }} />
+                        <b>{m.display_name}</b>
+                      </span>
+                    </td>
+                    <td className="st-num">{count === 0 ? <span className="st-chip st-chip--warn">None yet</span> : `${count} of ${services.length}`}</td>
+                    <td>{worksAt(m.id)}</td>
+                    <td>{m.active ? <span className="st-chip st-chip--ok">Active</span> : <span className="st-chip">Inactive</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {form && (
+        <Drawer
+          title={form.id ? `Edit ${form.name || "staff member"}` : "Add staff member"}
+          onClose={() => setForm(null)}
+          footer={
+            <>
+              <button type="button" className="st-btn st-btn--ghost" onClick={() => setForm(null)}>
+                Cancel
+              </button>
+              <button type="button" className="st-btn" onClick={save} disabled={saving}>
+                {saving ? "Saving…" : "Save staff member"}
+              </button>
+            </>
+          }
+        >
+          {formError && <div className="st-error" role="alert">{formError}</div>}
+
+          <div className="st-field">
+            <label htmlFor="staff-name">Name</label>
+            <input id="staff-name" className="st-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </div>
+
+          <div className="st-field">
+            <span className="st-label">Appointment colour</span>
+            <div className="st-swatches" role="group" aria-label="Appointment colour">
+              {STAFF_COLOURS.map((c) => {
+                const takenBy = usedColours.get(c.toLowerCase());
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    className="st-swatch"
+                    style={{ ["--sw" as string]: c }}
+                    aria-pressed={form.colour.toLowerCase() === c.toLowerCase()}
+                    aria-label={takenBy ? `${c} (used by ${takenBy})` : c}
+                    title={takenBy ? `Used by ${takenBy}` : undefined}
+                    onClick={() => setForm({ ...form, colour: c })}
+                  />
+                );
+              })}
             </div>
-          ))}
-        </div>
+            <span className="st-hint">
+              Their appointment slots on the calendar use this colour.
+              {usedColours.has(form.colour.toLowerCase()) && ` Also used by ${usedColours.get(form.colour.toLowerCase())}.`}
+            </span>
+          </div>
+
+          <div className="st-field">
+            <span className="st-label">Treatments they do ({form.serviceIds.length})</span>
+            {serviceGroups.map((g) => {
+              const ids = g.items.map((s) => s.id);
+              const allOn = ids.every((id) => form.serviceIds.includes(id));
+              return (
+                <div key={g.slug} className="st-group-block">
+                  <div className="st-group-block-head">
+                    <span>{categoryLabel(g.slug)}</span>
+                    <button type="button" className="st-link" onClick={() => toggleGroup(ids, allOn)}>
+                      {allOn ? "Clear all" : "Select all"}
+                    </button>
+                  </div>
+                  <div className="st-group-block-body">
+                    {g.items.map((s) => (
+                      <label key={s.id} className="st-check">
+                        <input type="checkbox" checked={form.serviceIds.includes(s.id)} onChange={() => toggleService(s.id)} />
+                        {s.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {form.id && (
+            <Switch id="staff-active" checked={form.active} onChange={(v) => setForm({ ...form, active: v })} label={form.active ? "Active" : "Inactive (hidden from booking)"} />
+          )}
+
+          <span className="st-hint">
+            Working days, hours and location are set on the <Link to="/staff/rota">Rota</Link>.
+          </span>
+        </Drawer>
       )}
     </div>
   );

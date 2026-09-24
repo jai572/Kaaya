@@ -33,9 +33,10 @@ const FEATURE_KEYS: FeatureKey[] = [
   "view_all_bookings",
   "manage_all_bookings",
   "view_revenue",
+  "manage_locations",
 ];
 
-async function withStaff<T>(request: Request, env: Env, fn: (staff: Awaited<ReturnType<typeof requireStaff>>) => Promise<T>) {
+export async function withStaff<T>(request: Request, env: Env, fn: (staff: Awaited<ReturnType<typeof requireStaff>>) => Promise<T>) {
   try {
     const staff = await requireStaff(request, env);
     return await fn(staff);
@@ -191,7 +192,7 @@ export async function getStaffWorkingHours(request: Request, env: Env, staffMemb
     const admin = adminClient(env);
     const { data, error } = await admin
       .from("staff_working_hours")
-      .select("day_of_week, start_time, end_time")
+      .select("day_of_week, start_time, end_time, location_id")
       .eq("staff_member_id", staffMemberId)
       .order("day_of_week");
     if (error) return errorResponse(error.message, 500);
@@ -218,7 +219,13 @@ export async function setStaffWorkingHours(request: Request, env: Env, staffMemb
 
     const rows = parsed.data.blocks
       .filter((b) => b.start_time && b.end_time)
-      .map((b) => ({ staff_member_id: staffMemberId, day_of_week: b.day_of_week, start_time: b.start_time, end_time: b.end_time }));
+      .map((b) => ({
+        staff_member_id: staffMemberId,
+        day_of_week: b.day_of_week,
+        start_time: b.start_time,
+        end_time: b.end_time,
+        location_id: b.location_id,
+      }));
 
     if (rows.length > 0) {
       const { error: insertError } = await admin.from("staff_working_hours").insert(rows);

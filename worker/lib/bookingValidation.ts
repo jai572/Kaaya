@@ -66,30 +66,103 @@ export const createServiceSchema = z.object({
   duration_minutes: z.number().int().positive().nullable().optional(),
   display_order: z.number().int().optional(),
   notes: z.string().trim().max(2000).optional(),
+  booking_mode: z.enum(["both", "bookable_only", "walk_in_only"]).optional(),
 });
 
 export const updateServiceSchema = createServiceSchema.partial().extend({
   active: z.boolean().optional(),
 });
 
+const colourSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Colour must be a hex value like #1b8580");
+
 export const createStaffMemberSchema = z.object({
   staff_profile_id: z.string().uuid().nullable().optional(),
   display_name: z.string().trim().min(1),
+  colour: colourSchema.nullable().optional(),
 });
 
 export const updateStaffMemberSchema = createStaffMemberSchema.partial().extend({
   active: z.boolean().optional(),
 });
 
-export const workingHoursBlockSchema = z.object({
-  day_of_week: z.number().int().min(0).max(6),
-  start_time: timeOnlySchema.nullable(),
-  end_time: timeOnlySchema.nullable(),
-});
+export const workingHoursBlockSchema = z
+  .object({
+    day_of_week: z.number().int().min(0).max(6),
+    start_time: timeOnlySchema.nullable(),
+    end_time: timeOnlySchema.nullable(),
+    location_id: z.string().uuid().nullable().optional(),
+  })
+  .refine((b) => !(b.start_time && b.end_time) || !!b.location_id, { message: "Pick a location for each working day" })
+  .refine((b) => !(b.start_time && b.end_time) || b.end_time > b.start_time, { message: "End time must be after start time" });
 
 export const setStaffWorkingHoursSchema = z.object({
   blocks: z.array(workingHoursBlockSchema),
 });
+
+const optionalText = z
+  .string()
+  .trim()
+  .max(200)
+  .nullable()
+  .optional()
+  .transform((v) => (v ? v : null));
+
+export const locationSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  phone: optionalText,
+  email: z
+    .string()
+    .trim()
+    .nullable()
+    .optional()
+    .transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), { message: "Enter a valid email" }),
+  active: z.boolean().optional(),
+  display_order: z.number().int().optional(),
+});
+
+export const updateLocationSchema = locationSchema.partial();
+
+export const setLocationHoursSchema = z.object({
+  days: z.array(
+    z
+      .object({
+        day_of_week: z.number().int().min(0).max(6),
+        open_time: timeOnlySchema.nullable(),
+        close_time: timeOnlySchema.nullable(),
+      })
+      .refine((d) => !(d.open_time && d.close_time) || d.close_time > d.open_time, {
+        message: "Closing time must be after opening time",
+      })
+  ),
+});
+
+export const bookingSettingsSchema = z.object({
+  client_booking_window_days: z.number().int().min(1).max(730),
+});
+
+export const setStaffServicesSchema = z.object({
+  service_ids: z.array(z.string().uuid()),
+});
+
+export const createRotaExceptionSchema = z
+  .object({
+    staff_member_id: z.string().uuid(),
+    from_date: dateOnlySchema,
+    to_date: dateOnlySchema,
+    kind: z.enum(["off", "working"]),
+    location_id: z.string().uuid().nullable().optional(),
+    start_time: timeOnlySchema.nullable().optional(),
+    end_time: timeOnlySchema.nullable().optional(),
+    reason: z.string().trim().max(200).nullable().optional(),
+  })
+  .refine((e) => e.to_date >= e.from_date, { message: "End date must be on or after start date" })
+  .refine(
+    (e) =>
+      e.kind === "off" ||
+      (!!e.location_id && !!e.start_time && !!e.end_time && (e.end_time as string) > (e.start_time as string)),
+    { message: "Working days need a location and a start time before the end time" }
+  );
 
 export const setServiceStaffCapabilitySchema = z.object({
   staff_member_ids: z.array(z.string().uuid()),
@@ -105,6 +178,7 @@ export const setStaffPermissionsSchema = z.object({
         "view_all_bookings",
         "manage_all_bookings",
         "view_revenue",
+        "manage_locations",
       ]),
       granted: z.boolean().nullable(), // null = clear the override, back to role default
     })

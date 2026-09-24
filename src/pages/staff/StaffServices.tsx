@@ -1,16 +1,18 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { supabase } from "../../lib/supabaseClient";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   staffListBookingServices,
   staffCreateService,
   staffUpdateService,
   staffListStaffMembers,
-  staffGetServiceStaffCapabilities,
+  staffListServiceStaffLinks,
   staffSetServiceStaffCapabilities,
   type BookableService,
+  type BookingMode,
   type StaffMemberRow,
 } from "../../lib/api";
+import { formatMoney, formatDuration } from "../../lib/bookingFormat";
+import { categoryLabel, slugify, parsePriceToPence, penceToInput } from "../../lib/staffFormat";
+import { Drawer, PageHead, Segmented, Switch, errorMessage } from "../../components/staff/ui";
 
 type Treatment = {
   id: string;
@@ -21,286 +23,452 @@ type Treatment = {
   requires_patch_test: boolean;
 };
 
-type RowEdit = {
+const BOOKING_MODE_LABEL: Record<BookingMode, string> = {
+  both: "Both",
+  bookable_only: "Bookable only",
+  walk_in_only: "Walk-in only",
+};
+
+const BOOKING_MODE_HINT: Record<BookingMode, string> = {
+  both: "Clients can book online, and staff can add it for walk-ins.",
+  bookable_only: "Clients can book online. Staff can still add it at the desk.",
+  walk_in_only: "Shown on the booking page but not bookable online. Staff add it to an appointment.",
+};
+
+const NEW_CATEGORY = "__new__";
+
+type Form = {
+  id: string | null;
+  category: string;
+  newCategory: string;
   name: string;
-  priceInput: string; // pounds, as typed
-  durationInput: string; // minutes, as typed
+  duration: string;
+  price: string;
+  priceIsFrom: boolean;
+  bookingMode: BookingMode;
   treatmentId: string;
   tintProductType: "" | "hair_dye" | "other";
   eyelashSafe: "inherit" | "yes" | "no";
-  notes: string;
-  staffMemberIds: string[];
+  active: boolean;
+  staffIds: string[];
 };
 
-function toRowEdit(service: BookableService): RowEdit {
+function formFromService(s: BookableService, staffIds: string[]): Form {
   return {
-    name: service.name,
-    priceInput: (service.price_amount / 100).toFixed(2),
-    durationInput: service.duration_minutes ? String(service.duration_minutes) : "",
-    treatmentId: service.treatment_id ?? "",
-    tintProductType: service.tint_product_type ?? "",
-    eyelashSafe: service.eyelash_safe === true ? "yes" : service.eyelash_safe === false ? "no" : "inherit",
-    notes: "",
-    staffMemberIds: [],
+    id: s.id,
+    category: s.category_slug,
+    newCategory: "",
+    name: s.name,
+    duration: s.duration_minutes ? String(s.duration_minutes) : "",
+    price: penceToInput(s.price_amount),
+    priceIsFrom: s.price_is_from,
+    bookingMode: s.booking_mode ?? "both",
+    treatmentId: s.treatment_id ?? "",
+    tintProductType: s.tint_product_type ?? "",
+    eyelashSafe: s.eyelash_safe === true ? "yes" : s.eyelash_safe === false ? "no" : "inherit",
+    active: s.active ?? true,
+    staffIds,
+  };
+}
+
+function emptyForm(category: string): Form {
+  return {
+    id: null,
+    category: category || NEW_CATEGORY,
+    newCategory: "",
+    name: "",
+    duration: "",
+    price: "",
+    priceIsFrom: false,
+    bookingMode: "both",
+    treatmentId: "",
+    tintProductType: "",
+    eyelashSafe: "inherit",
+    active: true,
+    staffIds: [],
   };
 }
 
 export default function StaffServices() {
-  const navigate = useNavigate();
   const [services, setServices] = useState<BookableService[] | null>(null);
   const [treatments, setTreatments] = useState<Treatment[]>([]);
-  const [staffMembers, setStaffMembers] = useState<StaffMemberRow[]>([]);
-  const [edits, setEdits] = useState<Record<string, RowEdit>>({});
+  const [staff, setStaff] = useState<StaffMemberRow[]>([]);
+  const [links, setLinks] = useState<{ service_id: string; staff_member_id: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [savedId, setSavedId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [form, setForm] = useState<Form | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const [newService, setNewService] = useState({ name: "", category_slug: "", priceInput: "" });
-  const [creating, setCreating] = useState(false);
-
-  function loadAll() {
-    Promise.all([staffListBookingServices(), staffListStaffMembers()])
-      .then(async ([servicesRes, staffRes]) => {
-        setServices(servicesRes.services);
-        setTreatments(servicesRes.treatments);
-        setStaffMembers(staffRes.staffMembers);
-
-        const capabilityEntries = await Promise.all(
-          servicesRes.services.map(async (s) => {
-            const { staffMemberIds } = await staffGetServiceStaffCapabilities(s.id);
-            return [s.id, staffMemberIds] as const;
-          })
-        );
-        const capabilityMap = Object.fromEntries(capabilityEntries);
-        setEdits(
-          Object.fromEntries(
-            servicesRes.services.map((s) => [s.id, { ...toRowEdit(s), staffMemberIds: capabilityMap[s.id] ?? [] }])
-          )
-        );
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "Could not load services"));
-  }
+  const load = useCallback(async () => {
+    try {
+      const [svc, st, ln] = await Promise.all([staffListBookingServices(), staffListStaffMembers(), staffListServiceStaffLinks()]);
+      setServices(svc.services);
+      setTreatments(svc.treatments);
+      setStaff(st.staffMembers);
+      setLinks(ln.links);
+    } catch (e) {
+      setError(errorMessage(e, "Could not load services"));
+    }
+  }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        navigate("/staff/login");
-        return;
+    load();
+  }, [load]);
+
+  const treatmentById = useMemo(() => new Map(treatments.map((t) => [t.id, t])), [treatments]);
+  const staffById = useMemo(() => new Map(staff.map((m) => [m.id, m])), [staff]);
+
+  const categories = useMemo(() => {
+    const set = new Set((services ?? []).map((s) => s.category_slug));
+    return [...set].sort((a, b) => categoryLabel(a).localeCompare(categoryLabel(b)));
+  }, [services]);
+
+  const groups = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = (services ?? []).filter(
+      (s) => !q || s.name.toLowerCase().includes(q) || categoryLabel(s.category_slug).toLowerCase().includes(q)
+    );
+    return categories
+      .map((c) => ({
+        slug: c,
+        items: list
+          .filter((s) => s.category_slug === c)
+          .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name)),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [services, categories, search]);
+
+  function staffIdsFor(serviceId: string) {
+    return links.filter((l) => l.service_id === serviceId).map((l) => l.staff_member_id);
+  }
+
+  function openEdit(s: BookableService) {
+    setForm(formFromService(s, staffIdsFor(s.id)));
+    setFormError(null);
+  }
+
+  function openNew() {
+    setForm(emptyForm(categories[0] ?? ""));
+    setFormError(null);
+  }
+
+  async function save() {
+    if (!form) return;
+    const categorySlug = form.category === NEW_CATEGORY ? slugify(form.newCategory) : form.category;
+    const price = parsePriceToPence(form.price);
+    const duration = form.duration.trim() ? parseInt(form.duration, 10) : null;
+
+    if (!categorySlug) return setFormError("Choose or name a head treatment.");
+    if (!form.name.trim()) return setFormError("Enter a treatment name.");
+    if (price === null) return setFormError("Enter a price in pounds, e.g. 12 or 12.50.");
+    if (duration !== null && (!Number.isInteger(duration) || duration < 1)) return setFormError("Duration must be a whole number of minutes.");
+    if (duration === null && form.bookingMode !== "walk_in_only") return setFormError("Set a duration so the treatment can be booked.");
+
+    const payload = {
+      name: form.name.trim(),
+      category_slug: categorySlug,
+      price_amount: price,
+      price_is_from: form.priceIsFrom,
+      duration_minutes: duration,
+      booking_mode: form.bookingMode,
+      treatment_id: form.treatmentId || null,
+      tint_product_type: form.tintProductType || null,
+      eyelash_safe: form.eyelashSafe === "yes" ? true : form.eyelashSafe === "no" ? false : null,
+    };
+
+    setSaving(true);
+    setFormError(null);
+    try {
+      let id = form.id;
+      if (id) {
+        await staffUpdateService(id, { ...payload, active: form.active });
+      } else {
+        id = (await staffCreateService(payload)).id;
+        if (!form.active) await staffUpdateService(id, { active: false });
       }
-      loadAll();
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigate]);
-
-  function updateEdit(serviceId: string, patch: Partial<RowEdit>) {
-    setEdits((prev) => ({ ...prev, [serviceId]: { ...prev[serviceId], ...patch } }));
-  }
-
-  async function saveService(service: BookableService) {
-    const edit = edits[service.id];
-    if (!edit) return;
-    setSavingId(service.id);
-    setSavedId(null);
-    setError(null);
-    try {
-      await staffUpdateService(service.id, {
-        name: edit.name,
-        price_amount: Math.round(parseFloat(edit.priceInput || "0") * 100),
-        duration_minutes: edit.durationInput ? parseInt(edit.durationInput, 10) : null,
-        treatment_id: edit.treatmentId || null,
-        tint_product_type: edit.tintProductType || null,
-        eyelash_safe: edit.eyelashSafe === "yes" ? true : edit.eyelashSafe === "no" ? false : null,
-      });
-      await staffSetServiceStaffCapabilities(service.id, edit.staffMemberIds);
-      setSavedId(service.id);
+      await staffSetServiceStaffCapabilities(id, form.staffIds);
+      setForm(null);
+      await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save service");
+      setFormError(errorMessage(e, "Could not save treatment"));
     } finally {
-      setSavingId(null);
+      setSaving(false);
     }
   }
 
-  async function createService() {
-    if (!newService.name.trim() || !newService.category_slug.trim()) return;
-    setCreating(true);
-    setError(null);
-    try {
-      await staffCreateService({
-        name: newService.name.trim(),
-        category_slug: newService.category_slug.trim(),
-        price_amount: Math.round(parseFloat(newService.priceInput || "0") * 100),
-      });
-      setNewService({ name: "", category_slug: "", priceInput: "" });
-      loadAll();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create service");
-    } finally {
-      setCreating(false);
-    }
-  }
+  const mappedTreatment = form?.treatmentId ? treatmentById.get(form.treatmentId) : undefined;
 
   return (
-    <div className="kaaya-shell kaaya-shell--wide">
-      <div className="kaaya-header">
-        <h1>Kaaya — Services</h1>
-        <p>Manage bookable treatments, prices and which staff can perform them.</p>
+    <div className="st-page">
+      <PageHead
+        title="Services"
+        subtitle="Treatments, times and prices. Shared by all locations."
+        actions={
+          <>
+            <input
+              className="st-input"
+              style={{ width: 220 }}
+              type="search"
+              placeholder="Search treatments"
+              aria-label="Search treatments"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <button type="button" className="st-btn" onClick={openNew}>
+              + Add treatment
+            </button>
+          </>
+        }
+      />
+
+      {error && <div className="st-error" role="alert">{error}</div>}
+
+      <div className="st-card st-table-wrap">
+        {services === null ? (
+          <div className="st-empty">Loading…</div>
+        ) : groups.length === 0 ? (
+          <div className="st-empty">No treatments match “{search}”.</div>
+        ) : (
+          <table className="st-table">
+            <thead>
+              <tr>
+                <th>Treatment</th>
+                <th>Time</th>
+                <th>Price</th>
+                <th>Patch test</th>
+                <th>Online booking</th>
+                <th>Staff</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <GroupRows
+                  key={g.slug}
+                  label={categoryLabel(g.slug)}
+                  items={g.items}
+                  onOpen={openEdit}
+                  patchTest={(s) => !!(s.treatment_id && treatmentById.get(s.treatment_id)?.requires_patch_test)}
+                  staffFor={(s) => staffIdsFor(s.id).map((id) => staffById.get(id)).filter((m): m is StaffMemberRow => !!m)}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      <p>
-        <Link to="/staff">← Back to consultations</Link> · <Link to="/staff/staff-members">Staff members</Link> ·{" "}
-        <Link to="/staff/bookings">Bookings</Link>
-      </p>
+      {form && (
+        <Drawer
+          title={form.id ? "Edit treatment" : "Add treatment"}
+          onClose={() => setForm(null)}
+          footer={
+            <>
+              <button type="button" className="st-btn st-btn--ghost" onClick={() => setForm(null)}>
+                Cancel
+              </button>
+              <button type="button" className="st-btn" onClick={save} disabled={saving}>
+                {saving ? "Saving…" : "Save treatment"}
+              </button>
+            </>
+          }
+        >
+          {formError && <div className="st-error" role="alert">{formError}</div>}
 
-      {error && <p className="kaaya-error">{error}</p>}
+          <div className="st-field">
+            <label htmlFor="svc-category">Head treatment</label>
+            <select id="svc-category" className="st-select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {categoryLabel(c)}
+                </option>
+              ))}
+              <option value={NEW_CATEGORY}>New head treatment…</option>
+            </select>
+            {form.category === NEW_CATEGORY && (
+              <input
+                aria-label="New head treatment name"
+                className="st-input"
+                placeholder="e.g. Tinting"
+                value={form.newCategory}
+                onChange={(e) => setForm({ ...form, newCategory: e.target.value })}
+              />
+            )}
+          </div>
 
-      <div className="kaaya-card">
-        <h2 style={{ marginTop: 0, fontSize: "1rem" }}>Add a new service</h2>
-        <div className="kaaya-field">
-          <label htmlFor="new-service-name">Name</label>
-          <input
-            id="new-service-name"
-            type="text"
-            value={newService.name}
-            onChange={(e) => setNewService((s) => ({ ...s, name: e.target.value }))}
-          />
-        </div>
-        <div className="kaaya-field">
-          <label htmlFor="new-service-category">Category slug</label>
-          <input
-            id="new-service-category"
-            type="text"
-            value={newService.category_slug}
-            onChange={(e) => setNewService((s) => ({ ...s, category_slug: e.target.value }))}
-          />
-        </div>
-        <div className="kaaya-field">
-          <label htmlFor="new-service-price">Price (£)</label>
-          <input
-            id="new-service-price"
-            type="text"
-            value={newService.priceInput}
-            onChange={(e) => setNewService((s) => ({ ...s, priceInput: e.target.value }))}
-          />
-        </div>
-        <button type="button" className="kaaya-btn kaaya-btn--secondary" disabled={creating} onClick={createService}>
-          {creating ? "Adding…" : "Add service"}
-        </button>
-      </div>
+          <div className="st-field">
+            <label htmlFor="svc-name">Treatment</label>
+            <input id="svc-name" className="st-input" placeholder="e.g. Eyebrow shaping" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </div>
 
-      {services && (
-        <div className="kaaya-card">
-          {services.map((service) => {
-            const edit = edits[service.id];
-            const selectedTreatment = treatments.find((t) => t.id === edit?.treatmentId);
-            return (
-              <div key={service.id} style={{ borderBottom: "1px solid var(--kaaya-border)", padding: "14px 0" }}>
-                <strong>{service.name}</strong>
-                {!service.duration_minutes && (
-                  <span className="kaaya-badge kaaya-badge--MEDIUM" style={{ marginLeft: 8 }}>
-                    Duration not set
-                  </span>
-                )}
-                <div style={{ color: "var(--kaaya-text-muted)", fontSize: "0.85rem", margin: "4px 0 8px" }}>
-                  {service.category_slug}
-                </div>
+          <div className="st-grid-2">
+            <div className="st-field">
+              <label htmlFor="svc-duration">Duration (minutes)</label>
+              <input id="svc-duration" className="st-input" inputMode="numeric" value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} />
+            </div>
+            <div className="st-field">
+              <label htmlFor="svc-price">Price (£)</label>
+              <input id="svc-price" className="st-input" inputMode="decimal" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+              <label className="st-check">
+                <input type="checkbox" checked={form.priceIsFrom} onChange={(e) => setForm({ ...form, priceIsFrom: e.target.checked })} />
+                Show as “from” price
+              </label>
+            </div>
+          </div>
 
-                <div className="kaaya-field">
-                  <label htmlFor={`price-${service.id}`}>Price (£)</label>
-                  <input
-                    id={`price-${service.id}`}
-                    type="text"
-                    value={edit?.priceInput ?? ""}
-                    onChange={(e) => updateEdit(service.id, { priceInput: e.target.value })}
-                  />
-                </div>
+          <div className="st-field">
+            <span className="st-label">Online booking</span>
+            <Segmented<BookingMode>
+              label="Online booking"
+              value={form.bookingMode}
+              onChange={(v) => setForm({ ...form, bookingMode: v })}
+              options={(Object.keys(BOOKING_MODE_LABEL) as BookingMode[]).map((v) => ({ value: v, label: BOOKING_MODE_LABEL[v] }))}
+            />
+            <span className="st-hint">{BOOKING_MODE_HINT[form.bookingMode]}</span>
+          </div>
 
-                <div className="kaaya-field">
-                  <label htmlFor={`duration-${service.id}`}>Duration (minutes)</label>
-                  <input
-                    id={`duration-${service.id}`}
-                    type="text"
-                    placeholder="Not set"
-                    value={edit?.durationInput ?? ""}
-                    onChange={(e) => updateEdit(service.id, { durationInput: e.target.value })}
-                  />
-                </div>
+          <div className="st-field">
+            <label htmlFor="svc-screening">Consultation screening</label>
+            <select id="svc-screening" className="st-select" value={form.treatmentId} onChange={(e) => setForm({ ...form, treatmentId: e.target.value })}>
+              <option value="">None</option>
+              {treatments.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <span className="st-hint">
+              {mappedTreatment?.requires_patch_test ? (
+                <span className="st-chip st-chip--warn">Patch test required</span>
+              ) : (
+                "Links this treatment to the consultation form’s safety questions. Patch test rules come from here."
+              )}
+            </span>
+          </div>
 
-                <div className="kaaya-field">
-                  <label htmlFor={`treatment-${service.id}`}>Kaaya screening treatment</label>
-                  <select
-                    id={`treatment-${service.id}`}
-                    value={edit?.treatmentId ?? ""}
-                    onChange={(e) => updateEdit(service.id, { treatmentId: e.target.value })}
-                  >
-                    <option value="">Not mapped</option>
-                    {treatments.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
+          {(mappedTreatment?.is_tint || mappedTreatment?.is_eyelash) && (
+            <div className="st-grid-2">
+              {mappedTreatment?.is_tint && (
+                <div className="st-field">
+                  <label htmlFor="svc-tint">Tint product</label>
+                  <select id="svc-tint" className="st-select" value={form.tintProductType} onChange={(e) => setForm({ ...form, tintProductType: e.target.value as Form["tintProductType"] })}>
+                    <option value="">Not set</option>
+                    <option value="hair_dye">Hair dye</option>
+                    <option value="other">Other</option>
                   </select>
                 </div>
-
-                {selectedTreatment?.is_tint && (
-                  <div className="kaaya-field">
-                    <label htmlFor={`tint-${service.id}`}>Tint product type</label>
-                    <select
-                      id={`tint-${service.id}`}
-                      value={edit?.tintProductType ?? ""}
-                      onChange={(e) => updateEdit(service.id, { tintProductType: e.target.value as RowEdit["tintProductType"] })}
-                    >
-                      <option value="">Not set</option>
-                      <option value="hair_dye">Hair dye</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                )}
-
-                <div className="kaaya-field">
-                  <label htmlFor={`eyelash-${service.id}`}>Eyelash-safe</label>
-                  <select
-                    id={`eyelash-${service.id}`}
-                    value={edit?.eyelashSafe ?? "inherit"}
-                    onChange={(e) => updateEdit(service.id, { eyelashSafe: e.target.value as RowEdit["eyelashSafe"] })}
-                  >
-                    <option value="inherit">Inherit from treatment</option>
-                    <option value="yes">Yes</option>
-                    <option value="no">No</option>
-                  </select>
-                </div>
-
-                <div className="kaaya-field">
-                  <label>Staff who can perform this service</label>
-                  {staffMembers.map((m) => (
-                    <label key={m.id} className="kaaya-checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={edit?.staffMemberIds.includes(m.id) ?? false}
-                        onChange={(e) => {
-                          const ids = new Set(edit?.staffMemberIds ?? []);
-                          if (e.target.checked) ids.add(m.id);
-                          else ids.delete(m.id);
-                          updateEdit(service.id, { staffMemberIds: Array.from(ids) });
-                        }}
-                      />
-                      <span>{m.display_name}</span>
-                    </label>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  className="kaaya-btn kaaya-btn--secondary"
-                  disabled={savingId === service.id}
-                  onClick={() => saveService(service)}
-                >
-                  {savingId === service.id ? "Saving…" : savedId === service.id ? "Saved" : "Save"}
-                </button>
+              )}
+              <div className="st-field">
+                <label htmlFor="svc-eyelash">Eyelash-safe</label>
+                <select id="svc-eyelash" className="st-select" value={form.eyelashSafe} onChange={(e) => setForm({ ...form, eyelashSafe: e.target.value as Form["eyelashSafe"] })}>
+                  <option value="inherit">As screening says</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          )}
+
+          <div className="st-field">
+            <span className="st-label">Staff who do this treatment</span>
+            {staff.length === 0 ? (
+              <span className="st-hint">Add staff first.</span>
+            ) : (
+              <div className="st-pick-list">
+                {staff
+                  .filter((m) => m.active || form.staffIds.includes(m.id))
+                  .map((m) => {
+                    const on = form.staffIds.includes(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className="st-pick"
+                        aria-pressed={on}
+                        onClick={() =>
+                          setForm({ ...form, staffIds: on ? form.staffIds.filter((x) => x !== m.id) : [...form.staffIds, m.id] })
+                        }
+                      >
+                        <span className="st-dot" style={{ ["--dot" as string]: m.colour ?? undefined }} />
+                        {m.display_name}
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
+            <span className="st-hint">Only these staff get online slots for it.</span>
+          </div>
+
+          <Switch
+            id="svc-active"
+            checked={form.active}
+            onChange={(v) => setForm({ ...form, active: v })}
+            label={form.active ? "Active" : "Hidden (not offered anywhere)"}
+          />
+        </Drawer>
       )}
     </div>
+  );
+}
+
+function GroupRows({
+  label,
+  items,
+  onOpen,
+  patchTest,
+  staffFor,
+}: {
+  label: string;
+  items: BookableService[];
+  onOpen: (s: BookableService) => void;
+  patchTest: (s: BookableService) => boolean;
+  staffFor: (s: BookableService) => StaffMemberRow[];
+}) {
+  return (
+    <>
+      <tr className="st-group">
+        <td colSpan={6}>
+          {label} <span className="st-muted">· {items.length}</span>
+        </td>
+      </tr>
+      {items.map((s) => {
+        const mode = s.booking_mode ?? "both";
+        const people = staffFor(s);
+        return (
+          <tr
+            key={s.id}
+            className="st-clickable"
+            tabIndex={0}
+            onClick={() => onOpen(s)}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onOpen(s))}
+          >
+            <td>
+              {s.name} {s.active === false && <span className="st-chip">Hidden</span>}
+            </td>
+            <td className="st-num">{s.duration_minutes ? formatDuration(s.duration_minutes) : <span className="st-muted">—</span>}</td>
+            <td className="st-num">
+              {s.price_is_from ? "from " : ""}
+              {formatMoney(s.price_amount, s.price_currency)}
+            </td>
+            <td>{patchTest(s) ? <span className="st-chip st-chip--warn">Required</span> : <span className="st-muted">—</span>}</td>
+            <td>
+              <span className={`st-chip ${mode === "walk_in_only" ? "st-chip--warn" : mode === "bookable_only" ? "st-chip--ok" : "st-chip--acc"}`}>
+                {BOOKING_MODE_LABEL[mode]}
+              </span>
+            </td>
+            <td>
+              {people.length === 0 ? (
+                <span className="st-muted">Nobody</span>
+              ) : (
+                <span style={{ display: "inline-flex", gap: 4 }} title={people.map((m) => m.display_name).join(", ")}>
+                  {people.map((m) => (
+                    <span key={m.id} className="st-dot" style={{ ["--dot" as string]: m.colour ?? undefined }} />
+                  ))}
+                </span>
+              )}
+            </td>
+          </tr>
+        );
+      })}
+    </>
   );
 }

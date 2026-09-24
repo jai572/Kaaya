@@ -102,7 +102,11 @@ export interface BookableService {
   price_is_from: boolean;
   duration_minutes: number | null;
   display_order: number;
+  booking_mode?: BookingMode;
+  active?: boolean;
 }
+
+export type BookingMode = "both" | "bookable_only" | "walk_in_only";
 
 export interface StaffMember {
   id: string;
@@ -247,6 +251,7 @@ export interface ServiceInput {
   duration_minutes?: number | null;
   display_order?: number;
   notes?: string;
+  booking_mode?: BookingMode;
 }
 
 export async function staffCreateService(input: ServiceInput) {
@@ -270,6 +275,7 @@ export interface StaffMemberRow {
   staff_profile_id: string | null;
   display_name: string;
   active: boolean;
+  colour: string | null;
 }
 
 export async function staffListStaffMembers() {
@@ -277,7 +283,7 @@ export async function staffListStaffMembers() {
   return request("/api/staff/booking/staff-members", { headers }) as Promise<{ staffMembers: StaffMemberRow[] }>;
 }
 
-export async function staffCreateStaffMember(input: { staff_profile_id?: string | null; display_name: string }) {
+export async function staffCreateStaffMember(input: { staff_profile_id?: string | null; display_name: string; colour?: string | null }) {
   const headers = await staffAuthHeader();
   return request("/api/staff/booking/staff-members", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{
     id: string;
@@ -286,7 +292,7 @@ export async function staffCreateStaffMember(input: { staff_profile_id?: string 
 
 export async function staffUpdateStaffMember(
   id: string,
-  input: Partial<{ staff_profile_id: string | null; display_name: string; active: boolean }>
+  input: Partial<{ staff_profile_id: string | null; display_name: string; active: boolean; colour: string | null }>
 ) {
   const headers = await staffAuthHeader();
   return request(`/api/staff/booking/staff-members/${id}`, {
@@ -300,12 +306,13 @@ export interface WorkingHoursBlock {
   day_of_week: number;
   start_time: string | null;
   end_time: string | null;
+  location_id: string | null;
 }
 
 export async function staffGetStaffWorkingHours(staffMemberId: string) {
   const headers = await staffAuthHeader();
   return request(`/api/staff/booking/staff-members/${staffMemberId}/hours`, { headers }) as Promise<{
-    hours: { day_of_week: number; start_time: string; end_time: string }[];
+    hours: { day_of_week: number; start_time: string; end_time: string; location_id: string | null }[];
   }>;
 }
 
@@ -469,7 +476,8 @@ export type FeatureKey =
   | "manage_service_capability"
   | "view_all_bookings"
   | "manage_all_bookings"
-  | "view_revenue";
+  | "view_revenue"
+  | "manage_locations";
 
 export async function staffListPermissions() {
   const headers = await staffAuthHeader();
@@ -490,4 +498,141 @@ export async function staffSetPermissions(
     headers,
     body: JSON.stringify({ overrides }),
   }) as Promise<{ updated: true }>;
+}
+
+// ---- Admin: locations, booking settings, rota ----
+
+export interface LocationHours {
+  day_of_week: number;
+  open_time: string;
+  close_time: string;
+}
+
+export interface LocationRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  active: boolean;
+  display_order: number;
+  hours: LocationHours[];
+}
+
+export async function staffListLocations() {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/admin/locations", { headers }) as Promise<{ locations: LocationRow[] }>;
+}
+
+export async function staffCreateLocation(input: { name: string; phone?: string | null; email?: string | null }) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/admin/locations", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{
+    id: string;
+  }>;
+}
+
+export async function staffUpdateLocation(
+  id: string,
+  input: Partial<{ name: string; phone: string | null; email: string | null; active: boolean }>
+) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/admin/locations/${id}`, { method: "PATCH", headers, body: JSON.stringify(input) }) as Promise<{
+    updated: true;
+  }>;
+}
+
+export async function staffSetLocationHours(
+  id: string,
+  days: { day_of_week: number; open_time: string | null; close_time: string | null }[]
+) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/admin/locations/${id}/hours`, { method: "PUT", headers, body: JSON.stringify({ days }) }) as Promise<{
+    updated: true;
+  }>;
+}
+
+export async function staffGetBookingSettings() {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/admin/settings", { headers }) as Promise<{ client_booking_window_days: number }>;
+}
+
+export async function staffUpdateBookingSettings(input: { client_booking_window_days: number }) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/admin/settings", { method: "PUT", headers, body: JSON.stringify(input) }) as Promise<{
+    updated: true;
+  }>;
+}
+
+export async function staffGetStaffServices(staffMemberId: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/admin/staff-members/${staffMemberId}/services`, { headers }) as Promise<{ serviceIds: string[] }>;
+}
+
+export async function staffSetStaffServices(staffMemberId: string, serviceIds: string[]) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/admin/staff-members/${staffMemberId}/services`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ service_ids: serviceIds }),
+  }) as Promise<{ updated: true }>;
+}
+
+export interface RotaHoursRow {
+  staff_member_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  location_id: string | null;
+}
+
+export async function staffGetRota() {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/admin/rota", { headers }) as Promise<{ hours: RotaHoursRow[] }>;
+}
+
+export interface RotaExceptionRow {
+  id: string;
+  staff_member_id: string;
+  date: string;
+  kind: "off" | "working";
+  location_id: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  reason: string | null;
+  created_at: string;
+  affected_bookings: number;
+}
+
+export async function staffListRotaExceptions(from?: string) {
+  const headers = await staffAuthHeader();
+  const qs = from ? `?from=${encodeURIComponent(from)}` : "";
+  return request(`/api/staff/admin/rota-exceptions${qs}`, { headers }) as Promise<{ exceptions: RotaExceptionRow[] }>;
+}
+
+export async function staffCreateRotaException(input: {
+  staff_member_id: string;
+  from_date: string;
+  to_date: string;
+  kind: "off" | "working";
+  location_id?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  reason?: string | null;
+}) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/admin/rota-exceptions", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{
+    saved: number;
+    affected_bookings: number;
+  }>;
+}
+
+export async function staffDeleteRotaException(id: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/admin/rota-exceptions/${id}`, { method: "DELETE", headers }) as Promise<{ deleted: true }>;
+}
+
+export async function staffListServiceStaffLinks() {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/admin/service-staff", { headers }) as Promise<{
+    links: { service_id: string; staff_member_id: string }[];
+  }>;
 }

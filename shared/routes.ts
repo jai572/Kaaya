@@ -16,6 +16,8 @@ export const KNOWN_EXACT_ROUTES = [
   "/staff/staff-members",
   "/staff/bookings",
   "/staff/permissions",
+  "/staff/rota",
+  "/staff/locations",
 ] as const;
 
 export const KNOWN_ROUTE_PATTERNS: RegExp[] = [

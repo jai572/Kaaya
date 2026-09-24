@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
 import { staffListPermissions, staffSetPermissions, type FeatureKey, type StaffProfileRow } from "../../lib/api";
 
@@ -10,6 +10,7 @@ const FEATURE_LABELS: Record<FeatureKey, string> = {
   view_all_bookings: "View all bookings",
   manage_all_bookings: "Cancel any booking",
   view_revenue: "View revenue totals",
+  manage_locations: "Manage locations, opening hours and online booking settings",
 };
 
 type OverrideState = "default" | "allow" | "deny";
@@ -72,10 +73,6 @@ export default function StaffPermissions() {
         <h1>Kaaya — Staff permissions</h1>
         <p>Owner only. Force-allow or force-deny individual capabilities per staff login, overriding their role.</p>
       </div>
-
-      <p>
-        <Link to="/staff">← Back to consultations</Link>
-      </p>
 
       {error && <p className="kaaya-error">{error}</p>}
 

@@ -189,11 +189,6 @@ export default function StaffBookings() {
         <p>Your schedule — or everyone's, if your account has that capability.</p>
       </div>
 
-      <p>
-        <Link to="/staff">← Back to consultations</Link> · <Link to="/staff/services">Services</Link> ·{" "}
-        <Link to="/staff/staff-members">Staff members</Link>
-      </p>
-
       {changeRequests && changeRequests.length > 0 && (
         <div className="kaaya-card">
           <h2 style={{ marginTop: 0, fontSize: "1rem" }}>Pending client requests</h2>

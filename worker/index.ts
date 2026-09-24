@@ -38,6 +38,21 @@ import {
   listStaffPermissions,
   setStaffPermissions,
 } from "./routes/staffBooking";
+import {
+  listLocations,
+  createLocation,
+  updateLocation,
+  setLocationHours,
+  getBookingSettings,
+  updateBookingSettings,
+  getStaffServices,
+  setStaffServices,
+  getRota,
+  listRotaExceptions,
+  createRotaExceptions,
+  deleteRotaException,
+  listServiceStaffLinks,
+} from "./routes/staffAdmin";
 import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -204,6 +219,27 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (path === "/api/staff/booking/revenue-summary" && method === "GET") {
     return getRevenueSummary(request, env, url);
   }
+
+  if (path === "/api/staff/admin/locations" && method === "GET") return listLocations(request, env);
+  if (path === "/api/staff/admin/locations" && method === "POST") return createLocation(request, env);
+  const locationMatch = path.match(/^\/api\/staff\/admin\/locations\/([^/]+)$/);
+  if (locationMatch && method === "PATCH") return updateLocation(request, env, locationMatch[1]);
+  const locationHoursMatch = path.match(/^\/api\/staff\/admin\/locations\/([^/]+)\/hours$/);
+  if (locationHoursMatch && method === "PUT") return setLocationHours(request, env, locationHoursMatch[1]);
+
+  if (path === "/api/staff/admin/settings" && method === "GET") return getBookingSettings(request, env);
+  if (path === "/api/staff/admin/settings" && method === "PUT") return updateBookingSettings(request, env);
+
+  const staffServicesMatch = path.match(/^\/api\/staff\/admin\/staff-members\/([^/]+)\/services$/);
+  if (staffServicesMatch && method === "GET") return getStaffServices(request, env, staffServicesMatch[1]);
+  if (staffServicesMatch && method === "PUT") return setStaffServices(request, env, staffServicesMatch[1]);
+
+  if (path === "/api/staff/admin/service-staff" && method === "GET") return listServiceStaffLinks(request, env);
+  if (path === "/api/staff/admin/rota" && method === "GET") return getRota(request, env);
+  if (path === "/api/staff/admin/rota-exceptions" && method === "GET") return listRotaExceptions(request, env, url);
+  if (path === "/api/staff/admin/rota-exceptions" && method === "POST") return createRotaExceptions(request, env);
+  const rotaExceptionMatch = path.match(/^\/api\/staff\/admin\/rota-exceptions\/([^/]+)$/);
+  if (rotaExceptionMatch && method === "DELETE") return deleteRotaException(request, env, rotaExceptionMatch[1]);
 
   if (path === "/api/staff/permissions" && method === "GET") {
     return listStaffPermissions(request, env);
