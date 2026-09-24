@@ -77,6 +77,7 @@ interface AppointmentRow {
   staff_member_id: string;
   booking_source: string;
   location_id: string | null;
+  visit_id: string | null;
 }
 
 /** Re-validates a specific requested slot server-side. The availability
@@ -84,13 +85,13 @@ interface AppointmentRow {
  * every write. Always: the staff member must be linked to the service.
  * When enforceRota (client bookings): the time must sit inside that person's
  * shift at this location on that date (regular rota, holidays/changes,
- * opening hours) and not be in the past. Staff bookings skip the rota check
+ * opening hours), not in the past, and not over blocked time (breaks). Staff bookings skip the rota check
  * by business rule -- staff can book any day, any time. The DB exclusion
  * constraint remains the final backstop against double-booking. */
 export async function validateSlotSafeguards(
   admin: SupabaseClient,
   params: {
-    serviceId: string;
+    serviceIds: string[];
     staffMemberId: string;
     locationId: string | null;
     startAtIso: string;
@@ -99,16 +100,15 @@ export async function validateSlotSafeguards(
     enforceRota?: boolean;
   }
 ): Promise<string | null> {
-  const { serviceId, staffMemberId, locationId, startAtIso, endAtIso, nowIso, enforceRota = true } = params;
+  const { serviceIds, staffMemberId, locationId, startAtIso, endAtIso, nowIso, enforceRota = true } = params;
 
-  const { data: link, error: linkError } = await admin
+  const { data: links, error: linkError } = await admin
     .from("service_staff")
     .select("service_id")
-    .eq("service_id", serviceId)
-    .eq("staff_member_id", staffMemberId)
-    .maybeSingle();
+    .in("service_id", serviceIds)
+    .eq("staff_member_id", staffMemberId);
   if (linkError) return linkError.message;
-  if (!link) return "This staff member cannot perform this service.";
+  if ((links ?? []).length < new Set(serviceIds).size) return "This staff member isn't set up to do this treatment (Setup → Staff).";
 
   if (!enforceRota) return null;
   if (!locationId) return "Choose a location.";
@@ -132,6 +132,16 @@ export async function validateSlotSafeguards(
   });
   if (!withinHours) return "That time isn't available with this staff member at this location.";
 
+  const { data: blocks, error: blockError } = await admin
+    .from("time_blocks")
+    .select("id")
+    .eq("staff_member_id", staffMemberId)
+    .lt("start_at", endAtIso)
+    .gt("end_at", startAtIso)
+    .limit(1);
+  if (blockError) return blockError.message;
+  if ((blocks ?? []).length > 0) return "That time isn't available with this staff member at this location.";
+
   return null;
 }
 
@@ -139,7 +149,7 @@ async function loadAppointment(admin: SupabaseClient, appointmentId: string): Pr
   const { data, error } = await admin
     .from("appointments")
     .select(
-      "id, client_id, consultation_id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, booking_source, location_id"
+      "id, client_id, consultation_id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, booking_source, location_id, visit_id"
     )
     .eq("id", appointmentId)
     .maybeSingle();
@@ -288,8 +298,16 @@ export async function performReschedule(
   const durationMs = new Date(appointment.end_at).getTime() - new Date(appointment.scheduled_at).getTime();
   const newEndAtIso = new Date(new Date(newStartAtIso).getTime() + durationMs).toISOString();
 
+  const { data: itemRows, error: itemsError } = await admin
+    .from("appointment_items")
+    .select("service_id, staff_member_id, service_name, duration_minutes, price_amount, price_currency, added_by")
+    .eq("appointment_id", appointmentId);
+  if (itemsError) throw new LifecycleError(itemsError.message, 500);
+  const items = itemRows ?? [];
+  const serviceIds = [...new Set([appointment.service_id, ...items.map((i) => i.service_id).filter((id): id is string => !!id)])];
+
   const safeguardError = await validateSlotSafeguards(admin, {
-    serviceId: appointment.service_id,
+    serviceIds,
     staffMemberId,
     locationId: appointment.location_id,
     startAtIso: newStartAtIso,
@@ -300,6 +318,21 @@ export async function performReschedule(
 
   const newStatus: AppointmentStatus =
     actor.actorType === "staff" || appointment.status === "confirmed" ? "confirmed" : "pending_approval";
+
+  // Claim the old row first, conditional on the status we just read: frees
+  // its slot so a small move (10:00 -> 10:15) doesn't collide with itself,
+  // and means only one of two simultaneous reschedules can ever win.
+  const { data: claimed, error: claimError } = await admin
+    .from("appointments")
+    .update({ status: "rescheduled" })
+    .eq("id", appointmentId)
+    .eq("status", appointment.status)
+    .select("id")
+    .maybeSingle();
+  if (claimError) throw new LifecycleError(claimError.message, 500);
+  if (!claimed) throw new LifecycleError("This appointment was just changed by someone else — refresh and try again.", 409);
+
+  const restore = () => admin.from("appointments").update({ status: appointment.status }).eq("id", appointmentId);
 
   const { data: newAppointment, error: insertError } = await admin
     .from("appointments")
@@ -315,43 +348,39 @@ export async function performReschedule(
       idempotency_key: crypto.randomUUID(),
       booking_source: appointment.booking_source,
       location_id: appointment.location_id,
+      visit_id: appointment.visit_id,
       status: newStatus,
       scheduled_at: newStartAtIso,
       end_at: newEndAtIso,
     })
     .select("id")
     .single();
-  if (insertError) {
-    if (insertError.code === "23P01") {
-      throw new LifecycleError("That time was just booked — please pick another slot.", 409);
+  if (insertError || !newAppointment) {
+    await restore();
+    if (insertError?.code === "23P01") {
+      throw new LifecycleError("That time overlaps another booking for this staff member.", 409);
     }
-    throw new LifecycleError(insertError.message, 500);
+    throw new LifecycleError(insertError?.message ?? "Could not save the rescheduled appointment", 500);
   }
-  if (!newAppointment) throw new LifecycleError("Could not save the rescheduled appointment", 500);
 
   // The treatments move with the visit; ones done by the original staff
   // member follow the booking to whoever it's now with.
-  const { data: items, error: itemsError } = await admin
-    .from("appointment_items")
-    .select("service_id, staff_member_id, service_name, duration_minutes, price_amount, price_currency, added_by")
-    .eq("appointment_id", appointmentId);
-  if (itemsError) throw new LifecycleError(itemsError.message, 500);
-  if (items && items.length > 0) {
-    const { error: copyError } = await admin.from("appointment_items").insert(
-      items.map((i) => ({
-        ...i,
-        appointment_id: newAppointment.id,
-        staff_member_id: i.staff_member_id === appointment.staff_member_id ? staffMemberId : i.staff_member_id,
-      }))
-    );
-    if (copyError) throw new LifecycleError(copyError.message, 500);
-  }
+  const { error: copyError } = items.length
+    ? await admin.from("appointment_items").insert(
+        items.map((i) => ({
+          ...i,
+          appointment_id: newAppointment.id,
+          staff_member_id: i.staff_member_id === appointment.staff_member_id ? staffMemberId : i.staff_member_id,
+        }))
+      )
+    : { error: null };
+  if (copyError) throw new LifecycleError(copyError.message, 500);
 
-  const { error: updateError } = await admin
+  const { error: linkError } = await admin
     .from("appointments")
-    .update({ status: "rescheduled", rescheduled_to_id: newAppointment.id })
+    .update({ rescheduled_to_id: newAppointment.id })
     .eq("id", appointmentId);
-  if (updateError) throw new LifecycleError(updateError.message, 500);
+  if (linkError) throw new LifecycleError(linkError.message, 500);
 
   await recordAuditEvent(admin, {
     appointment_id: appointmentId,

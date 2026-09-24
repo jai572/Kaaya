@@ -4,7 +4,8 @@ import { supabase } from "../../lib/supabaseClient";
 import "../../styles/staff.css";
 
 const DAILY_LINKS = [
-  { to: "/staff/bookings", label: "Bookings" },
+  { to: "/staff/calendar", label: "Calendar" },
+  { to: "/staff/bookings", label: "Approvals & requests" },
   { to: "/staff", label: "Consultations", end: true },
 ];
 
@@ -46,7 +47,7 @@ export default function StaffLayout() {
   return (
     <div className="st-app">
       <aside className="st-side">
-        <Link to="/staff/bookings" className="st-brand">
+        <Link to="/staff/calendar" className="st-brand">
           Kaaya
           <small>Staff</small>
         </Link>

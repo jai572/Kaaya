@@ -652,3 +652,124 @@ export async function staffListServiceStaffLinks() {
     links: { service_id: string; staff_member_id: string }[];
   }>;
 }
+
+// ---- Calendar (phase 4) ----
+
+export interface CalendarItem {
+  id: string;
+  service_id: string | null;
+  service_name: string;
+  duration_minutes: number;
+  price_amount: number;
+  staff_member_id: string | null;
+}
+
+export interface CalendarAppointment {
+  id: string;
+  client_id: string;
+  staff_member_id: string;
+  service_id: string;
+  service_name: string;
+  duration_minutes: number;
+  price_amount: number;
+  price_currency: string;
+  status: AppointmentStatus;
+  scheduled_at: string;
+  end_at: string;
+  visit_id: string | null;
+  booking_source: string;
+  consultation_id: string | null;
+  patch_test: boolean;
+  clients: { first_name: string; last_name: string; phone: string; email: string | null } | null;
+  appointment_items: CalendarItem[];
+}
+
+export type BlockReason = "break" | "lunch" | "personal" | "training" | "other";
+
+export interface CalendarBlock {
+  id: string;
+  staff_member_id: string;
+  start_at: string;
+  end_at: string;
+  reason: BlockReason;
+  note: string | null;
+}
+
+export interface CalendarShift {
+  startTime: string;
+  endTime: string;
+}
+
+export interface CalendarData {
+  location: { id: string; name: string; active: boolean; hours: { day_of_week: number; open_time: string; close_time: string }[] };
+  dates: string[];
+  own_staff_member_id: string | null;
+  can_view_all: boolean;
+  staff: { id: string; display_name: string; colour: string | null; active: boolean }[];
+  shifts: Record<string, Record<string, CalendarShift | null>>;
+  appointments: CalendarAppointment[];
+  blocks: CalendarBlock[];
+}
+
+export async function staffGetCalendar(locationId: string, from: string, to: string) {
+  const headers = await staffAuthHeader();
+  const params = new URLSearchParams({ location_id: locationId, from, to });
+  return request(`/api/staff/calendar?${params.toString()}`, { headers }) as Promise<CalendarData>;
+}
+
+export interface StaffBookingPart {
+  staff_member_id: string;
+  start_at: string;
+  service_ids: string[];
+}
+
+export async function staffCreateCalendarAppointments(input: {
+  client_id: string;
+  location_id: string;
+  link_appointment_id?: string | null;
+  confirm_warnings?: boolean;
+  parts: StaffBookingPart[];
+}) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/calendar/appointments", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<
+    { needs_confirmation: true; warnings: string[] } | { needs_confirmation?: undefined; appointment_ids: string[]; visit_id: string | null }
+  >;
+}
+
+export async function staffCreateTimeBlock(input: {
+  staff_member_id: string;
+  location_id: string;
+  start_at: string;
+  end_at: string;
+  reason: BlockReason;
+  note?: string | null;
+}) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/calendar/blocks", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{ id: string }>;
+}
+
+export async function staffDeleteTimeBlock(id: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/calendar/blocks/${id}`, { method: "DELETE", headers }) as Promise<{ deleted: true }>;
+}
+
+export interface ClientSummary {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string | null;
+}
+
+export async function staffSearchClients(q: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/clients?q=${encodeURIComponent(q)}`, { headers }) as Promise<{ clients: ClientSummary[] }>;
+}
+
+export async function staffCreateClient(input: { first_name: string; last_name: string; phone: string; email?: string | null }) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/clients", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{
+    client: ClientSummary;
+    existing: boolean;
+  }>;
+}

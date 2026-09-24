@@ -19,7 +19,7 @@ export default function StaffLogin() {
       setError(signInError.message);
       return;
     }
-    navigate("/staff");
+    navigate("/staff/calendar");
   }
 
   return (

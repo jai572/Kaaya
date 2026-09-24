@@ -176,7 +176,7 @@ export async function updateStaffMember(request: Request, env: Env, staffMemberI
   });
 }
 
-async function ownStaffMemberId(env: Env, staffProfileId: string): Promise<string | null> {
+export async function ownStaffMemberId(env: Env, staffProfileId: string): Promise<string | null> {
   const admin = adminClient(env);
   const { data } = await admin.from("staff_members").select("id").eq("staff_profile_id", staffProfileId).maybeSingle();
   return data?.id ?? null;

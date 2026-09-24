@@ -145,6 +145,20 @@ export async function getAvailability(env: Env, url: URL): Promise<Response> {
     : { data: [], error: null };
   if (bookedError) return errorResponse(bookedError.message, 500);
 
+  // Breaks and other blocked time are off-limits online, wherever they are.
+  const { data: blockRows, error: blockError } = working.length
+    ? await admin
+        .from("time_blocks")
+        .select("staff_member_id, start_at, end_at")
+        .in(
+          "staff_member_id",
+          working.map((m) => m.id)
+        )
+        .lt("start_at", to)
+        .gt("end_at", from)
+    : { data: [], error: null };
+  if (blockError) return errorResponse(blockError.message, 500);
+
   const allSlots: { staffMemberId: string; staffMemberName: string; startAt: string; endAt: string }[] = [];
   const nowIso = new Date().toISOString();
   for (const member of working) {
@@ -152,9 +166,10 @@ export async function getAvailability(env: Env, url: URL): Promise<Response> {
       dateIso: date,
       durationMinutes: service.duration_minutes,
       workingBlock: day.shifts.get(member.id) ?? null,
-      bookedIntervals: (bookedRows ?? [])
-        .filter((b) => b.staff_member_id === member.id)
-        .map((b) => ({ startAt: b.scheduled_at, endAt: b.end_at })),
+      bookedIntervals: [
+        ...(bookedRows ?? []).filter((b) => b.staff_member_id === member.id).map((b) => ({ startAt: b.scheduled_at, endAt: b.end_at })),
+        ...(blockRows ?? []).filter((b) => b.staff_member_id === member.id).map((b) => ({ startAt: b.start_at, endAt: b.end_at })),
+      ],
       nowIso,
     });
     for (const slot of slots) {
@@ -247,7 +262,7 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
   // Re-validates the exact requested slot server-side -- the availability
   // endpoint's slot list is the common-case UX, this is the actual gate.
   const safeguardError = await validateSlotSafeguards(admin, {
-    serviceId: service.id,
+    serviceIds: [service.id],
     staffMemberId: input.staff_member_id,
     locationId: input.location_id,
     startAtIso: startAt.toISOString(),

@@ -186,3 +186,54 @@ export const setStaffPermissionsSchema = z.object({
     })
   ),
 });
+
+export const calendarQuerySchema = z
+  .object({
+    location_id: z.string().uuid({ message: "Choose a location" }),
+    from: dateOnlySchema,
+    to: dateOnlySchema,
+  })
+  .refine((q) => q.to >= q.from, { message: "End date must be on or after start date" });
+
+export const staffCreateAppointmentsSchema = z.object({
+  client_id: z.string().uuid(),
+  location_id: z.string().uuid(),
+  link_appointment_id: z.string().uuid().nullable().optional(),
+  confirm_warnings: z.boolean().optional(),
+  parts: z
+    .array(
+      z.object({
+        staff_member_id: z.string().uuid(),
+        start_at: z.string().datetime({ offset: true }),
+        service_ids: z.array(z.string().uuid()).min(1, "Pick at least one treatment").max(12),
+      })
+    )
+    .min(1)
+    .max(6),
+});
+
+export const createTimeBlockSchema = z
+  .object({
+    staff_member_id: z.string().uuid(),
+    location_id: z.string().uuid(),
+    start_at: z.string().datetime({ offset: true }),
+    end_at: z.string().datetime({ offset: true }),
+    reason: z.enum(["break", "lunch", "personal", "training", "other"]),
+    note: z.string().trim().max(200).nullable().optional(),
+  })
+  .refine((b) => Date.parse(b.end_at) > Date.parse(b.start_at), { message: "End time must be after start time" })
+  .refine((b) => Date.parse(b.end_at) - Date.parse(b.start_at) <= 16 * 3600000, { message: "Blocked time can't be longer than a day" });
+
+export const staffCreateClientSchema = z.object({
+  first_name: z.string().trim().min(1, "First name is required").max(100),
+  last_name: z.string().trim().max(100).default(""),
+  phone: z.string().trim().min(5, "Phone number is required").max(40),
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .nullable()
+    .optional()
+    .transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), { message: "Enter a valid email" }),
+});

@@ -54,6 +54,14 @@ import {
   deleteRotaException,
   listServiceStaffLinks,
 } from "./routes/staffAdmin";
+import {
+  getCalendar,
+  staffCreateAppointments,
+  createTimeBlock,
+  deleteTimeBlock,
+  searchClients,
+  staffCreateClient,
+} from "./routes/staffCalendar";
 import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -213,6 +221,14 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (resolveChangeRequestMatch && method === "PATCH") {
     return resolveChangeRequest(request, env, resolveChangeRequestMatch[1]);
   }
+
+  if (path === "/api/staff/calendar" && method === "GET") return getCalendar(request, env, url);
+  if (path === "/api/staff/calendar/appointments" && method === "POST") return staffCreateAppointments(request, env);
+  if (path === "/api/staff/calendar/blocks" && method === "POST") return createTimeBlock(request, env);
+  const timeBlockMatch = path.match(/^\/api\/staff\/calendar\/blocks\/([^/]+)$/);
+  if (timeBlockMatch && method === "DELETE") return deleteTimeBlock(request, env, timeBlockMatch[1]);
+  if (path === "/api/staff/clients" && method === "GET") return searchClients(request, env, url);
+  if (path === "/api/staff/clients" && method === "POST") return staffCreateClient(request, env);
 
   const clientRecordMatch = path.match(/^\/api\/staff\/clients\/([^/]+)$/);
   if (clientRecordMatch && method === "GET") {
