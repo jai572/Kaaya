@@ -296,6 +296,7 @@ export default function StaffCalendar() {
       {fresh && prefs.view !== "list" && columns.length > 0 && (
         <TimeGrid
           columns={columns}
+          minColumnWidth={prefs.view === "week" ? 104 : 148}
           window={gridWindow}
           colourFor={(id) => staffColour(staffById.get(id)?.colour)}
           onOpenAppointment={(a) => setOpen({ kind: "appt", id: a.id })}

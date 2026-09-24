@@ -35,7 +35,9 @@ export default function TimeGrid({
   onOpenAppointment,
   onOpenBlock,
   onEmptyClick,
+  minColumnWidth = 148,
 }: {
+  minColumnWidth?: number;
   columns: GridColumn[];
   window: { start: number; end: number };
   colourFor: (staffId: string) => string;
@@ -56,7 +58,7 @@ export default function TimeGrid({
 
   return (
     <div className="st-cal-scroll">
-      <div className="st-cal-grid" style={{ gridTemplateColumns: `56px repeat(${columns.length}, minmax(148px, 1fr))` }}>
+      <div className="st-cal-grid" style={{ gridTemplateColumns: `56px repeat(${columns.length}, minmax(${minColumnWidth}px, 1fr))` }}>
         <div className="st-cal-corner" />
         {columns.map((col) => (
           <div key={col.key} className={`st-cal-colhead${col.isToday ? " st-cal-colhead--today" : ""}`}>
