@@ -92,8 +92,7 @@
         We are an established Brow Bar in Aberdeen, highly experienced in all aspects of
         Threading - an ancient art of eyebrow shaping and unwanted hair removal - and we aim to
         satisfy all your hair &amp; beauty needs. We provide treatments for facial threading,
-        eyebrow/eyelash tinting, eyelash extensions, face waxing, manicure/pedicure and henna
-        body tattoos.
+        eyebrow/eyelash tinting, eyelash extensions, face waxing and manicure/pedicure.
       </p>
       <p>We are conveniently located right in the middle of Aberdeen city-centre shopping mall, Bon Accord.</p>
       <p>
@@ -115,6 +114,7 @@
     (function () {
       var showFallback = function () {
         var root = document.getElementById("root");
+        if (window.__kaayaMounted) return;
         if (root && root.childElementCount === 0) {
           root.innerHTML =
             '<div style="max-width:480px;margin:40px auto;padding:20px;font-family:sans-serif;text-align:center;">' +

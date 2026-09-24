@@ -6,7 +6,15 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import "./styles/theme.css";
 import "./styles/site.css";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+const rootEl = document.getElementById("root")!;
+// index.html's safety-net message may already be in #root if this script
+// was slow to arrive; it must not survive underneath the real app. The flag
+// stops it being injected later while a lazy page chunk is still loading
+// (React leaves #root empty during that Suspense).
+(window as unknown as { __kaayaMounted?: boolean }).__kaayaMounted = true;
+rootEl.replaceChildren();
+
+ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
     <ErrorBoundary>
       <BrowserRouter>
