@@ -62,7 +62,11 @@ export default function BookingForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [locationsAttempt, setLocationsAttempt] = useState(0);
+
   useEffect(() => {
+    setLocationsLoading(true);
+    setLocationsError(null);
     getBookingLocations()
       .then((res) => {
         setLocations(res.locations);
@@ -72,7 +76,7 @@ export default function BookingForm() {
       })
       .catch(() => setLocationsError("Could not load our locations. Please try again."))
       .finally(() => setLocationsLoading(false));
-  }, []);
+  }, [locationsAttempt]);
 
   useEffect(() => {
     getBookableServices()
@@ -222,7 +226,14 @@ export default function BookingForm() {
       {step === "location" && (
         <div className="kaaya-card">
           {locationsLoading && <p>Loading locations…</p>}
-          {locationsError && <p className="kaaya-error">{locationsError}</p>}
+          {locationsError && (
+            <>
+              <p className="kaaya-error">{locationsError}</p>
+              <button type="button" className="kaaya-btn kaaya-btn--secondary" onClick={() => setLocationsAttempt((n) => n + 1)}>
+                Try again
+              </button>
+            </>
+          )}
           {!locationsLoading && !locationsError && (
             <>
               <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>Where would you like to visit?</p>
