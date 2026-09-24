@@ -156,6 +156,12 @@ export default function ManageBooking() {
               <th>Treatment</th>
               <td>{appointment.service_name}</td>
             </tr>
+            {appointment.location_name && (
+              <tr>
+                <th>Location</th>
+                <td>{appointment.location_name}</td>
+              </tr>
+            )}
             <tr>
               <th>Date &amp; time</th>
               <td>
@@ -201,6 +207,7 @@ export default function ManageBooking() {
           appointmentId={appointmentId!}
           bookingReference={reference.trim()}
           serviceId={appointment.service_id}
+          locationId={appointment.location_id}
           onDone={(result) => setView(result.status === "rescheduled" ? "reschedule-done" : "change-requested")}
           onCancel={() => setView("status")}
         />

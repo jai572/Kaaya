@@ -5,6 +5,7 @@ import { submitConsultation, getClientConsultation, finalizeConsultation } from 
 import { listStaffConsultations, getStaffConsultation, recordStaffReview } from "./routes/staff";
 import {
   listBookableServices,
+  listPublicLocations,
   listStaffForService,
   getAvailability,
   lookupOrCreateCustomer,
@@ -76,6 +77,8 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (finalizeMatch && method === "POST") {
     return finalizeConsultation(request, env, finalizeMatch[1]);
   }
+
+  if (path === "/api/booking/locations" && method === "GET") return listPublicLocations(env);
 
   if (path === "/api/booking/services" && method === "GET") {
     return listBookableServices(env);

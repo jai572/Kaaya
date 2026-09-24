@@ -40,11 +40,13 @@ const STATUS_BADGE: Record<AppointmentStatus, string> = {
 function ReschedulePicker({
   appointmentId,
   serviceId,
+  locationId,
   onDone,
   onCancel,
 }: {
   appointmentId: string;
   serviceId: string;
+  locationId: string | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -55,13 +57,18 @@ function ReschedulePicker({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    if (!locationId) {
+      setSlots([]);
+      setError("This booking has no location on record.");
+      return;
+    }
     setLoading(true);
     setError(null);
-    getAvailability(serviceId, date)
+    getAvailability(serviceId, locationId, date)
       .then((res) => setSlots(res.slots))
       .catch(() => setError("Could not load availability."))
       .finally(() => setLoading(false));
-  }, [serviceId, date]);
+  }, [serviceId, locationId, date]);
 
   async function pick(slot: AvailabilitySlot) {
     setSubmitting(true);
@@ -355,6 +362,7 @@ export default function StaffBookings() {
                 <ReschedulePicker
                   appointmentId={a.id}
                   serviceId={a.service_id}
+                  locationId={a.location_id}
                   onDone={() => {
                     setReschedulingId(null);
                     load(date, statusFilter);

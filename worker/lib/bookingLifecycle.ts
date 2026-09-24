@@ -4,7 +4,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { recordAuditEvent } from "./audit";
-import { toDayOfWeek, londonDateIso, isWithinWorkingHours } from "./availability";
+import { londonDateIso, isWithinWorkingHours } from "./availability";
+import { loadShifts, type Shift } from "./schedule";
 
 export type AppointmentStatus = "pending_approval" | "confirmed" | "completed" | "no_show" | "cancelled" | "rescheduled";
 
@@ -75,19 +76,30 @@ interface AppointmentRow {
   price_currency: string;
   staff_member_id: string;
   booking_source: string;
+  location_id: string | null;
 }
 
 /** Re-validates a specific requested slot server-side. The availability
  * endpoint's slot list is the common-case UX; this is the actual gate on
- * every write, so a client can never book (or reschedule into) a staff
- * member who isn't linked to the service, or a time outside their working
- * hours, regardless of what the client sends. The DB exclusion constraint
- * remains the final backstop against a genuine double-booking race. */
+ * every write. Always: the staff member must be linked to the service.
+ * When enforceRota (client bookings): the time must sit inside that person's
+ * shift at this location on that date (regular rota, holidays/changes,
+ * opening hours) and not be in the past. Staff bookings skip the rota check
+ * by business rule -- staff can book any day, any time. The DB exclusion
+ * constraint remains the final backstop against double-booking. */
 export async function validateSlotSafeguards(
   admin: SupabaseClient,
-  params: { serviceId: string; staffMemberId: string; startAtIso: string; endAtIso: string; nowIso?: string }
+  params: {
+    serviceId: string;
+    staffMemberId: string;
+    locationId: string | null;
+    startAtIso: string;
+    endAtIso: string;
+    nowIso?: string;
+    enforceRota?: boolean;
+  }
 ): Promise<string | null> {
-  const { serviceId, staffMemberId, startAtIso, endAtIso, nowIso } = params;
+  const { serviceId, staffMemberId, locationId, startAtIso, endAtIso, nowIso, enforceRota = true } = params;
 
   const { data: link, error: linkError } = await admin
     .from("service_staff")
@@ -98,24 +110,27 @@ export async function validateSlotSafeguards(
   if (linkError) return linkError.message;
   if (!link) return "This staff member cannot perform this service.";
 
+  if (!enforceRota) return null;
+  if (!locationId) return "Choose a location.";
+
   const dateIso = londonDateIso(startAtIso);
-  const dayOfWeek = toDayOfWeek(dateIso);
-  const { data: hoursRow, error: hoursError } = await admin
-    .from("staff_working_hours")
-    .select("start_time, end_time")
-    .eq("staff_member_id", staffMemberId)
-    .eq("day_of_week", dayOfWeek)
-    .maybeSingle();
-  if (hoursError) return hoursError.message;
+  let shift: Shift | null;
+  try {
+    const day = await loadShifts(admin, { staffMemberIds: [staffMemberId], locationId, dateIso });
+    if (!day.location || !day.location.active) return "That location isn't taking bookings.";
+    shift = day.shifts.get(staffMemberId) ?? null;
+  } catch (e) {
+    return e instanceof Error ? e.message : "Could not check the rota";
+  }
 
   const withinHours = isWithinWorkingHours({
     dateIso,
     startAtIso,
     endAtIso,
-    workingBlock: hoursRow ? { startTime: hoursRow.start_time, endTime: hoursRow.end_time } : null,
+    workingBlock: shift,
     nowIso: nowIso ?? new Date().toISOString(),
   });
-  if (!withinHours) return "That time is outside this staff member's working hours.";
+  if (!withinHours) return "That time isn't available with this staff member at this location.";
 
   return null;
 }
@@ -124,7 +139,7 @@ async function loadAppointment(admin: SupabaseClient, appointmentId: string): Pr
   const { data, error } = await admin
     .from("appointments")
     .select(
-      "id, client_id, consultation_id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, booking_source"
+      "id, client_id, consultation_id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, booking_source, location_id"
     )
     .eq("id", appointmentId)
     .maybeSingle();
@@ -276,8 +291,10 @@ export async function performReschedule(
   const safeguardError = await validateSlotSafeguards(admin, {
     serviceId: appointment.service_id,
     staffMemberId,
+    locationId: appointment.location_id,
     startAtIso: newStartAtIso,
     endAtIso: newEndAtIso,
+    enforceRota: actor.actorType !== "staff",
   });
   if (safeguardError) throw new LifecycleError(safeguardError, 400);
 
@@ -297,6 +314,7 @@ export async function performReschedule(
       price_currency: appointment.price_currency,
       idempotency_key: crypto.randomUUID(),
       booking_source: appointment.booking_source,
+      location_id: appointment.location_id,
       status: newStatus,
       scheduled_at: newStartAtIso,
       end_at: newEndAtIso,
@@ -310,6 +328,24 @@ export async function performReschedule(
     throw new LifecycleError(insertError.message, 500);
   }
   if (!newAppointment) throw new LifecycleError("Could not save the rescheduled appointment", 500);
+
+  // The treatments move with the visit; ones done by the original staff
+  // member follow the booking to whoever it's now with.
+  const { data: items, error: itemsError } = await admin
+    .from("appointment_items")
+    .select("service_id, staff_member_id, service_name, duration_minutes, price_amount, price_currency, added_by")
+    .eq("appointment_id", appointmentId);
+  if (itemsError) throw new LifecycleError(itemsError.message, 500);
+  if (items && items.length > 0) {
+    const { error: copyError } = await admin.from("appointment_items").insert(
+      items.map((i) => ({
+        ...i,
+        appointment_id: newAppointment.id,
+        staff_member_id: i.staff_member_id === appointment.staff_member_id ? staffMemberId : i.staff_member_id,
+      }))
+    );
+    if (copyError) throw new LifecycleError(copyError.message, 500);
+  }
 
   const { error: updateError } = await admin
     .from("appointments")

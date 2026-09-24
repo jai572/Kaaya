@@ -128,8 +128,19 @@ export function getBookingStaff(serviceId: string) {
   return request(`/api/booking/staff?service_id=${encodeURIComponent(serviceId)}`) as Promise<{ staff: StaffMember[] }>;
 }
 
-export function getAvailability(serviceId: string, date: string, staffMemberId?: string) {
-  const params = new URLSearchParams({ service_id: serviceId, date });
+export interface PublicLocation {
+  id: string;
+  name: string;
+  phone: string | null;
+  hours: { day_of_week: number; open_time: string; close_time: string }[];
+}
+
+export function getBookingLocations() {
+  return request("/api/booking/locations") as Promise<{ locations: PublicLocation[]; booking_window_days: number }>;
+}
+
+export function getAvailability(serviceId: string, locationId: string, date: string, staffMemberId?: string) {
+  const params = new URLSearchParams({ service_id: serviceId, location_id: locationId, date });
   if (staffMemberId) params.set("staff_member_id", staffMemberId);
   return request(`/api/booking/availability?${params.toString()}`) as Promise<{ slots: AvailabilitySlot[] }>;
 }
@@ -154,12 +165,14 @@ export interface AppointmentSummary {
   price_amount: number;
   price_currency: string;
   start_at: string;
+  location_name?: string | null;
 }
 
 export function createBookingAppointment(input: {
   client_id: string;
   service_id: string;
   staff_member_id: string;
+  location_id: string;
   start_at: string;
 }) {
   return request("/api/booking/appointments", {
@@ -191,6 +204,8 @@ export interface AppointmentLookup {
   price_currency: string;
   staff_member_id: string;
   rescheduled_to_id: string | null;
+  location_id: string | null;
+  location_name: string | null;
 }
 
 export function getAppointmentByReference(appointmentId: string, bookingReference: string) {
@@ -352,6 +367,7 @@ export interface StaffAppointmentRow {
   scheduled_at: string;
   end_at: string;
   rescheduled_to_id: string | null;
+  location_id: string | null;
 }
 
 export async function staffListAppointments(date?: string, status?: AppointmentStatus) {

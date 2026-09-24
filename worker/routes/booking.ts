@@ -2,7 +2,9 @@ import type { Env } from "../env";
 import { json, errorResponse } from "../lib/http";
 import { adminClient } from "../lib/supabase";
 import { recordAuditEvent } from "../lib/audit";
-import { toDayOfWeek, computeAvailableSlots } from "../lib/availability";
+import { computeAvailableSlots, londonDateIso } from "../lib/availability";
+import { loadShifts, getBookingWindowDays } from "../lib/schedule";
+import { isWithinBookingWindow } from "../lib/rota";
 import {
   validateSlotSafeguards,
   performCancel,
@@ -28,7 +30,7 @@ export async function listBookableServices(env: Env): Promise<Response> {
   const { data, error } = await admin
     .from("services")
     .select(
-      "id, name, category_slug, treatment_id, tint_product_type, eyelash_safe, price_amount, price_currency, price_is_from, duration_minutes, display_order"
+      "id, name, category_slug, treatment_id, tint_product_type, eyelash_safe, price_amount, price_currency, price_is_from, duration_minutes, display_order, booking_mode"
     )
     .eq("active", true)
     .order("category_slug", { ascending: true })
@@ -57,28 +59,56 @@ export async function listStaffForService(env: Env, url: URL): Promise<Response>
   return json({ staff });
 }
 
-// Genuine live availability — computed from working hours + existing
-// bookings, never cached.
+// Public list of locations clients can pick from first, with opening hours
+// and how far ahead they can book. A location with no opening hours shows
+// but can't be booked yet.
+export async function listPublicLocations(env: Env): Promise<Response> {
+  const admin = adminClient(env);
+  const [locationsRes, hoursRes, windowDays] = await Promise.all([
+    admin.from("locations").select("id, name, phone").eq("active", true).order("display_order").order("name"),
+    admin.from("location_hours").select("location_id, day_of_week, open_time, close_time").order("day_of_week"),
+    getBookingWindowDays(admin),
+  ]);
+  if (locationsRes.error) return errorResponse(locationsRes.error.message, 500);
+  if (hoursRes.error) return errorResponse(hoursRes.error.message, 500);
+  return json({
+    booking_window_days: windowDays,
+    locations: (locationsRes.data ?? []).map((l) => ({
+      ...l,
+      hours: (hoursRes.data ?? []).filter((h) => h.location_id === l.id).map(({ location_id: _omit, ...h }) => h),
+    })),
+  });
+}
+
+// Genuine live availability at one location — computed from each staff
+// member's shift there that day (regular rota, holidays/changes, opening
+// hours) minus their existing bookings anywhere, never cached.
 export async function getAvailability(env: Env, url: URL): Promise<Response> {
   const parsed = availabilityQuerySchema.safeParse({
     service_id: url.searchParams.get("service_id") ?? "",
+    location_id: url.searchParams.get("location_id") ?? "",
     date: url.searchParams.get("date") ?? "",
     staff_member_id: url.searchParams.get("staff_member_id") ?? undefined,
   });
   if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
-  const { service_id, date, staff_member_id } = parsed.data;
+  const { service_id, location_id, date, staff_member_id } = parsed.data;
 
   const admin = adminClient(env);
 
   const { data: service, error: serviceError } = await admin
     .from("services")
-    .select("id, duration_minutes")
+    .select("id, duration_minutes, booking_mode, active")
     .eq("id", service_id)
     .maybeSingle();
   if (serviceError) return errorResponse(serviceError.message, 500);
-  if (!service) return errorResponse("Service not found", 404);
-  if (!service.duration_minutes) {
-    return errorResponse("This treatment isn't available for online time-slot booking yet", 400);
+  if (!service || !service.active) return errorResponse("Service not found", 404);
+  if (!service.duration_minutes || service.booking_mode === "walk_in_only") {
+    return errorResponse("This treatment can't be booked online — please visit or call.", 400);
+  }
+
+  const today = londonDateIso(new Date().toISOString());
+  if (!isWithinBookingWindow(date, today, await getBookingWindowDays(admin))) {
+    return json({ slots: [] });
   }
 
   let staffQuery = admin
@@ -93,37 +123,40 @@ export async function getAvailability(env: Env, url: URL): Promise<Response> {
     .map((row: any) => row.staff_members)
     .filter((m: any): m is { id: string; display_name: string; active: boolean } => !!m && m.active);
 
-  const dayOfWeek = toDayOfWeek(date);
-  const dayStart = `${date}T00:00:00.000Z`;
-  const dayEnd = `${date}T23:59:59.999Z`;
+  const day = await loadShifts(admin, { staffMemberIds: staffMembers.map((m) => m.id), locationId: location_id, dateIso: date });
+  if (!day.location || !day.location.active) return errorResponse("Location not found", 404);
+
+  // A person can't be in two places: bookings at any location block them.
+  // Widened a day each side because date is London-local, scheduled_at UTC.
+  const from = new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString();
+  const to = new Date(Date.parse(`${date}T23:59:59Z`) + 86400000).toISOString();
+  const working = staffMembers.filter((m) => day.shifts.get(m.id));
+  const { data: bookedRows, error: bookedError } = working.length
+    ? await admin
+        .from("appointments")
+        .select("staff_member_id, scheduled_at, end_at")
+        .in(
+          "staff_member_id",
+          working.map((m) => m.id)
+        )
+        .not("status", "in", `(${NON_BLOCKING_STATUSES.join(",")})`)
+        .gte("scheduled_at", from)
+        .lte("scheduled_at", to)
+    : { data: [], error: null };
+  if (bookedError) return errorResponse(bookedError.message, 500);
 
   const allSlots: { staffMemberId: string; staffMemberName: string; startAt: string; endAt: string }[] = [];
-
-  for (const member of staffMembers) {
-    const { data: hoursRow } = await admin
-      .from("staff_working_hours")
-      .select("start_time, end_time")
-      .eq("staff_member_id", member.id)
-      .eq("day_of_week", dayOfWeek)
-      .maybeSingle();
-
-    const { data: bookedRows, error: bookedError } = await admin
-      .from("appointments")
-      .select("scheduled_at, end_at")
-      .eq("staff_member_id", member.id)
-      .not("status", "in", `(${NON_BLOCKING_STATUSES.join(",")})`)
-      .gte("scheduled_at", dayStart)
-      .lte("scheduled_at", dayEnd);
-    if (bookedError) return errorResponse(bookedError.message, 500);
-
+  const nowIso = new Date().toISOString();
+  for (const member of working) {
     const slots = computeAvailableSlots({
       dateIso: date,
       durationMinutes: service.duration_minutes,
-      workingBlock: hoursRow ? { startTime: hoursRow.start_time, endTime: hoursRow.end_time } : null,
-      bookedIntervals: (bookedRows ?? []).map((b) => ({ startAt: b.scheduled_at, endAt: b.end_at })),
-      nowIso: new Date().toISOString(),
+      workingBlock: day.shifts.get(member.id) ?? null,
+      bookedIntervals: (bookedRows ?? [])
+        .filter((b) => b.staff_member_id === member.id)
+        .map((b) => ({ startAt: b.scheduled_at, endAt: b.end_at })),
+      nowIso,
     });
-
     for (const slot of slots) {
       allSlots.push({ staffMemberId: member.id, staffMemberName: member.display_name, ...slot });
     }
@@ -194,20 +227,29 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
   // client-supplied values for what Kaaya's own services table owns.
   const { data: service, error: serviceError } = await admin
     .from("services")
-    .select("id, name, duration_minutes, price_amount, price_currency")
+    .select("id, name, duration_minutes, price_amount, price_currency, booking_mode, active")
     .eq("id", input.service_id)
     .maybeSingle();
   if (serviceError) return errorResponse(serviceError.message, 500);
-  if (!service || !service.duration_minutes) return errorResponse("Service not bookable", 400);
+  if (!service || !service.active || !service.duration_minutes) return errorResponse("Service not bookable", 400);
+  if (service.booking_mode === "walk_in_only") {
+    return errorResponse("This treatment can't be booked online — please visit or call.", 400);
+  }
 
   const startAt = new Date(input.start_at);
   const endAt = new Date(startAt.getTime() + service.duration_minutes * 60000);
+
+  const today = londonDateIso(new Date().toISOString());
+  if (!isWithinBookingWindow(londonDateIso(startAt.toISOString()), today, await getBookingWindowDays(admin))) {
+    return errorResponse("That date is too far ahead to book online — please call us.", 400);
+  }
 
   // Re-validates the exact requested slot server-side -- the availability
   // endpoint's slot list is the common-case UX, this is the actual gate.
   const safeguardError = await validateSlotSafeguards(admin, {
     serviceId: service.id,
     staffMemberId: input.staff_member_id,
+    locationId: input.location_id,
     startAtIso: startAt.toISOString(),
     endAtIso: endAt.toISOString(),
   });
@@ -226,6 +268,7 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
       price_amount: service.price_amount,
       price_currency: service.price_currency,
       idempotency_key: idempotencyKey,
+      location_id: input.location_id,
       status: "pending_approval",
       scheduled_at: startAt.toISOString(),
       end_at: endAt.toISOString(),
@@ -244,12 +287,25 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
   }
   if (!appointment) return errorResponse("Could not save appointment", 500);
 
+  const { error: itemError } = await admin.from("appointment_items").insert({
+    appointment_id: appointment.id,
+    service_id: service.id,
+    staff_member_id: input.staff_member_id,
+    service_name: service.name,
+    duration_minutes: service.duration_minutes,
+    price_amount: service.price_amount,
+    price_currency: service.price_currency,
+  });
+  if (itemError) console.error("appointment_items insert failed", appointment.id, itemError);
+
+  const { data: location } = await admin.from("locations").select("name").eq("id", input.location_id).maybeSingle();
+
   await recordAuditEvent(admin, {
     appointment_id: appointment.id,
     actor_id: null,
     actor_type: "client",
     event_type: "appointment_booked",
-    metadata: { service_id: service.id, staff_member_id: input.staff_member_id },
+    metadata: { service_id: service.id, staff_member_id: input.staff_member_id, location_id: input.location_id },
   });
 
   return json(
@@ -262,6 +318,7 @@ export async function createAppointment(request: Request, env: Env): Promise<Res
         price_amount: service.price_amount,
         price_currency: service.price_currency,
         start_at: startAt.toISOString(),
+        location_name: location?.name ?? null,
       },
     },
     201
@@ -328,7 +385,7 @@ export async function linkAppointmentToConsultation(
 // knowledge of booking_reference (the appointment's idempotency key) is the
 // only credential a client has, since there's no login for this flow.
 const APPOINTMENT_LOOKUP_COLUMNS =
-  "id, client_id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, idempotency_key, rescheduled_to_id";
+  "id, client_id, status, scheduled_at, end_at, service_id, service_name, duration_minutes, price_amount, price_currency, staff_member_id, idempotency_key, rescheduled_to_id, location_id";
 
 async function loadOwnedAppointment(admin: ReturnType<typeof adminClient>, appointmentId: string, bookingReference: string) {
   const { data, error } = await admin
@@ -385,6 +442,9 @@ export async function getAppointmentByReference(env: Env, url: URL, appointmentI
   if (error) return error;
 
   const canSelfService = ["pending_approval", "confirmed"].includes(appointment!.status);
+  const { data: location } = appointment!.location_id
+    ? await admin.from("locations").select("name").eq("id", appointment!.location_id).maybeSingle()
+    : { data: null };
   return json({
     appointment: {
       id: appointment!.id,
@@ -398,6 +458,8 @@ export async function getAppointmentByReference(env: Env, url: URL, appointmentI
       price_currency: appointment!.price_currency,
       staff_member_id: appointment!.staff_member_id,
       rescheduled_to_id: appointment!.rescheduled_to_id,
+      location_id: appointment!.location_id,
+      location_name: location?.name ?? null,
     },
     resolved_from_original: resolvedFromOriginal ?? false,
     can_self_service: canSelfService,
@@ -470,6 +532,11 @@ export async function clientRequestReschedule(request: Request, env: Env, appoin
 
   if (!["pending_approval", "confirmed"].includes(appointment!.status)) {
     return errorResponse("This booking can no longer be rescheduled.", 409);
+  }
+
+  const today = londonDateIso(new Date().toISOString());
+  if (!isWithinBookingWindow(londonDateIso(parsed.data.new_start_at), today, await getBookingWindowDays(admin))) {
+    return errorResponse("That date is too far ahead to book online — please call us.", 400);
   }
 
   const actor = { actorId: null, actorType: "client" as const };

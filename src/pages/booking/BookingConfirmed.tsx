@@ -9,6 +9,7 @@ interface ConfirmedState {
   bookingReference: string;
   clientId: string;
   serviceId: string;
+  locationId?: string;
   contact: BookingContact;
   summary: AppointmentSummary;
 }
@@ -39,7 +40,7 @@ export default function BookingConfirmed() {
     );
   }
 
-  const { summary, contact, appointmentId, bookingReference, serviceId } = state;
+  const { summary, contact, appointmentId, bookingReference, serviceId, locationId } = state;
 
   // Durable across refresh/sharing (unlike router state), and lets the
   // consultation form associate itself with the correct appointment.
@@ -125,6 +126,12 @@ export default function BookingConfirmed() {
               <th>Treatment</th>
               <td>{summary.service_name}</td>
             </tr>
+            {summary.location_name && (
+              <tr>
+                <th>Location</th>
+                <td>{summary.location_name}</td>
+              </tr>
+            )}
             <tr>
               <th>Date &amp; time</th>
               <td>
@@ -162,6 +169,7 @@ export default function BookingConfirmed() {
           appointmentId={appointmentId}
           bookingReference={bookingReference}
           serviceId={serviceId}
+          locationId={locationId ?? null}
           onDone={(result) => setView(result.status === "rescheduled" ? "reschedule-done" : "change-requested")}
           onCancel={() => setView("summary")}
         />

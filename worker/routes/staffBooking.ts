@@ -284,7 +284,7 @@ export async function listAppointments(request: Request, env: Env, url: URL): Pr
     let query = admin
       .from("appointments")
       .select(
-        "id, client_id, service_id, staff_member_id, service_name, duration_minutes, price_amount, price_currency, status, scheduled_at, end_at, rescheduled_to_id"
+        "id, client_id, service_id, staff_member_id, service_name, duration_minutes, price_amount, price_currency, status, scheduled_at, end_at, rescheduled_to_id, location_id"
       )
       .order("scheduled_at", { ascending: true });
 

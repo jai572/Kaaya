@@ -6,11 +6,12 @@ interface BookingRescheduleProps {
   appointmentId: string;
   bookingReference: string;
   serviceId: string;
+  locationId: string | null;
   onDone: (result: { status: "rescheduled" | "pending_staff_approval" }) => void;
   onCancel: () => void;
 }
 
-export default function BookingReschedule({ appointmentId, bookingReference, serviceId, onDone, onCancel }: BookingRescheduleProps) {
+export default function BookingReschedule({ appointmentId, bookingReference, serviceId, locationId, onDone, onCancel }: BookingRescheduleProps) {
   const [date, setDate] = useState(todayIso());
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -20,14 +21,19 @@ export default function BookingReschedule({ appointmentId, bookingReference, ser
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setSelectedSlot(null);
+    if (!locationId) {
+      setSlots([]);
+      setSlotsError("This booking has no location on record. Please contact us to change it.");
+      return;
+    }
     setSlotsLoading(true);
     setSlotsError(null);
-    setSelectedSlot(null);
-    getAvailability(serviceId, date)
+    getAvailability(serviceId, locationId, date)
       .then((res) => setSlots(res.slots))
       .catch(() => setSlotsError("Could not load availability. Please try a different date."))
       .finally(() => setSlotsLoading(false));
-  }, [serviceId, date]);
+  }, [serviceId, locationId, date]);
 
   async function confirm() {
     if (!selectedSlot) return;

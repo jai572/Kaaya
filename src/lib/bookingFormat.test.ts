@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatMoney, formatDuration, filterSlotsByStaffMember, groupServicesByCategory } from "./bookingFormat";
+import { formatMoney, formatDuration, filterSlotsByStaffMember, groupServicesByCategory, isOnlineBookable } from "./bookingFormat";
 
 describe("formatMoney", () => {
   it("formats minor units as GBP currency", () => {
@@ -86,8 +86,26 @@ describe("groupServicesByCategory", () => {
     expect(groups.map((g) => g.slug)).toEqual(["threading"]);
   });
 
-  it("puts unrecognised category_slug values into a catch-all Other group instead of dropping them", () => {
-    const groups = groupServicesByCategory([{ id: "1", category_slug: "brand-new-category" }]);
-    expect(groups).toEqual([{ slug: "other", label: "Other", services: [{ id: "1", category_slug: "brand-new-category" }] }]);
+  it("gives a head treatment added in admin its own named group instead of dropping it", () => {
+    const groups = groupServicesByCategory([{ id: "1", category_slug: "henna-brow" }]);
+    expect(groups).toEqual([{ slug: "henna-brow", label: "Henna brow", services: [{ id: "1", category_slug: "henna-brow" }] }]);
+  });
+
+  it("lists new head treatments after the known ones", () => {
+    const groups = groupServicesByCategory([
+      { id: "1", category_slug: "tinting" },
+      { id: "2", category_slug: "threading" },
+    ]);
+    expect(groups.map((g) => g.slug)).toEqual(["threading", "tinting"]);
+  });
+});
+
+describe("isOnlineBookable", () => {
+  it("needs a duration and must not be walk-in only", () => {
+    expect(isOnlineBookable({ duration_minutes: 15, booking_mode: "both" })).toBe(true);
+    expect(isOnlineBookable({ duration_minutes: 15, booking_mode: "bookable_only" })).toBe(true);
+    expect(isOnlineBookable({ duration_minutes: 15 })).toBe(true);
+    expect(isOnlineBookable({ duration_minutes: 15, booking_mode: "walk_in_only" })).toBe(false);
+    expect(isOnlineBookable({ duration_minutes: null, booking_mode: "both" })).toBe(false);
   });
 });

@@ -6,6 +6,7 @@ export const timeOnlySchema = z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Expect
 
 export const availabilityQuerySchema = z.object({
   service_id: z.string().uuid(),
+  location_id: z.string().uuid({ message: "Choose a location" }),
   date: dateOnlySchema,
   staff_member_id: z.string().uuid().optional(),
 });
@@ -18,6 +19,7 @@ export const createAppointmentSchema = z.object({
   client_id: z.string().uuid(),
   service_id: z.string().uuid(),
   staff_member_id: z.string().uuid(),
+  location_id: z.string().uuid({ message: "Choose a location" }),
   start_at: z.string().datetime({ offset: true }),
 });
 

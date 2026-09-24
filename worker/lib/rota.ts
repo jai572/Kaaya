@@ -46,3 +46,46 @@ export function isAppointmentAffected(exception: RotaExceptionLike, appointment:
   const windowEnd = Date.parse(londonWallTimeToUtcIso(exception.date, exception.end_time));
   return Date.parse(appointment.scheduled_at) < windowStart || Date.parse(appointment.end_at) > windowEnd;
 }
+
+export interface ShiftLike {
+  start_time: string;
+  end_time: string;
+  location_id: string | null;
+}
+
+const hhmm = (t: string) => t.slice(0, 5);
+
+/** The hours a staff member can take online bookings at one location on one
+ * date: a dated exception replaces the regular rota for that day, the shift
+ * must be at this location, and it's trimmed to the location's opening hours
+ * (a closed day means no online slots). null = not bookable that day. */
+export function effectiveShift(params: {
+  locationId: string;
+  regular: ShiftLike | null;
+  exception: RotaExceptionLike | null;
+  opening: { open_time: string; close_time: string } | null;
+}): { startTime: string; endTime: string } | null {
+  const { locationId, regular, exception, opening } = params;
+  if (!opening) return null;
+
+  let shift: ShiftLike | null = regular;
+  if (exception) {
+    if (exception.kind === "off") return null;
+    shift = exception.start_time && exception.end_time
+      ? { start_time: exception.start_time, end_time: exception.end_time, location_id: exception.location_id }
+      : null;
+  }
+  if (!shift || shift.location_id !== locationId) return null;
+
+  const start = [hhmm(shift.start_time), hhmm(opening.open_time)].sort()[1];
+  const end = [hhmm(shift.end_time), hhmm(opening.close_time)].sort()[0];
+  return end > start ? { startTime: start, endTime: end } : null;
+}
+
+/** Whether a client may book this date online: not in the past, and no more
+ * than windowDays after today (both London calendar dates). */
+export function isWithinBookingWindow(dateIso: string, todayIso: string, windowDays: number): boolean {
+  if (dateIso < todayIso) return false;
+  const last = new Date(Date.parse(`${todayIso}T00:00:00Z`) + windowDays * 86400000).toISOString().slice(0, 10);
+  return dateIso <= last;
+}

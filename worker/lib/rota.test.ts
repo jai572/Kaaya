@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { expandDateRange, isAppointmentAffected, type RotaExceptionLike, type AppointmentLike } from "./rota";
+import {
+  expandDateRange,
+  isAppointmentAffected,
+  effectiveShift,
+  isWithinBookingWindow,
+  type RotaExceptionLike,
+  type AppointmentLike,
+} from "./rota";
 
 describe("expandDateRange", () => {
   it("includes both ends", () => {
@@ -76,5 +83,61 @@ describe("isAppointmentAffected", () => {
 
   it("an appointment running past the new end time is affected", () => {
     expect(isAppointmentAffected(working({ end_time: "10:15" }), appt())).toBe(true);
+  });
+});
+
+describe("effectiveShift", () => {
+  const LOC = "loc-a";
+  const OTHER = "loc-b";
+  const opening = { open_time: "09:00:00", close_time: "18:00:00" };
+  const regular = { start_time: "10:00:00", end_time: "17:00:00", location_id: LOC };
+
+  it("uses the regular rota at this location, trimmed to opening hours", () => {
+    expect(effectiveShift({ locationId: LOC, regular, exception: null, opening })).toEqual({ startTime: "10:00", endTime: "17:00" });
+    expect(
+      effectiveShift({ locationId: LOC, regular: { ...regular, start_time: "08:00", end_time: "19:00" }, exception: null, opening })
+    ).toEqual({ startTime: "09:00", endTime: "18:00" });
+  });
+
+  it("returns null when the regular shift is at another location", () => {
+    expect(effectiveShift({ locationId: OTHER, regular, exception: null, opening })).toBeNull();
+  });
+
+  it("returns null when the location is closed that day", () => {
+    expect(effectiveShift({ locationId: LOC, regular, exception: null, opening: null })).toBeNull();
+  });
+
+  it("a day-off exception removes the shift", () => {
+    const off = { date: "2026-10-20", kind: "off" as const, location_id: null, start_time: null, end_time: null };
+    expect(effectiveShift({ locationId: LOC, regular, exception: off, opening })).toBeNull();
+  });
+
+  it("a working exception replaces the regular shift, including moving location", () => {
+    const cover = { date: "2026-10-20", kind: "working" as const, location_id: OTHER, start_time: "12:00", end_time: "16:00" };
+    expect(effectiveShift({ locationId: LOC, regular, exception: cover, opening })).toBeNull();
+    expect(effectiveShift({ locationId: OTHER, regular, exception: cover, opening })).toEqual({ startTime: "12:00", endTime: "16:00" });
+  });
+
+  it("a working exception can add a shift on a normal day off", () => {
+    const extra = { date: "2026-10-20", kind: "working" as const, location_id: LOC, start_time: "09:00", end_time: "13:00" };
+    expect(effectiveShift({ locationId: LOC, regular: null, exception: extra, opening })).toEqual({ startTime: "09:00", endTime: "13:00" });
+  });
+
+  it("returns null when shift and opening hours don't overlap", () => {
+    expect(
+      effectiveShift({ locationId: LOC, regular: { ...regular, start_time: "18:00", end_time: "20:00" }, exception: null, opening })
+    ).toBeNull();
+  });
+});
+
+describe("isWithinBookingWindow", () => {
+  it("allows today through today + window days", () => {
+    expect(isWithinBookingWindow("2026-10-20", "2026-10-20", 90)).toBe(true);
+    expect(isWithinBookingWindow("2027-01-18", "2026-10-20", 90)).toBe(true);
+  });
+
+  it("rejects past dates and dates beyond the window", () => {
+    expect(isWithinBookingWindow("2026-10-19", "2026-10-20", 90)).toBe(false);
+    expect(isWithinBookingWindow("2027-01-19", "2026-10-20", 90)).toBe(false);
   });
 });

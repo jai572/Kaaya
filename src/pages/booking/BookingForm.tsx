@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   getBookableServices,
+  getBookingLocations,
   getAvailability,
   getBookingStaff,
   lookupOrCreateBookingCustomer,
@@ -9,6 +10,7 @@ import {
   type BookableService,
   type StaffMember,
   type AvailabilitySlot,
+  type PublicLocation,
 } from "../../lib/api";
 import {
   formatMoney,
@@ -16,15 +18,29 @@ import {
   todayIso,
   filterSlotsByStaffMember,
   groupServicesByCategory,
+  isOnlineBookable,
 } from "../../lib/bookingFormat";
+import { addDays, shortTime } from "../../lib/staffFormat";
 
-const STEPS = ["service", "date", "time", "contact", "summary"] as const;
+const STEPS = ["location", "service", "date", "time", "contact", "summary"] as const;
+
+function hoursToday(location: PublicLocation): string {
+  if (location.hours.length === 0) return "Not taking online bookings yet";
+  const h = location.hours.find((x) => x.day_of_week === new Date().getDay());
+  return h ? `Open today ${shortTime(h.open_time)}–${shortTime(h.close_time)}` : "Closed today";
+}
 type Step = (typeof STEPS)[number];
 
 export default function BookingForm() {
   const navigate = useNavigate();
   const [stepIndex, setStepIndex] = useState(0);
   const step: Step = STEPS[stepIndex];
+
+  const [locations, setLocations] = useState<PublicLocation[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
+  const [locationsError, setLocationsError] = useState<string | null>(null);
+  const [windowDays, setWindowDays] = useState(90);
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
 
   const [services, setServices] = useState<BookableService[]>([]);
   const [servicesLoading, setServicesLoading] = useState(true);
@@ -47,14 +63,28 @@ export default function BookingForm() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    getBookingLocations()
+      .then((res) => {
+        setLocations(res.locations);
+        setWindowDays(res.booking_window_days);
+        const bookable = res.locations.filter((l) => l.hours.length > 0);
+        if (bookable.length === 1) setSelectedLocationId(bookable[0].id);
+      })
+      .catch(() => setLocationsError("Could not load our locations. Please try again."))
+      .finally(() => setLocationsLoading(false));
+  }, []);
+
+  useEffect(() => {
     getBookableServices()
       .then((res) => setServices(res.services))
       .catch(() => setServicesError("Could not load treatments. Please try again."))
       .finally(() => setServicesLoading(false));
   }, []);
 
+  const selectedLocation = locations.find((l) => l.id === selectedLocationId) ?? null;
   const selectedService = services.find((s) => s.id === selectedServiceId) ?? null;
-  const bookableOnline = !!selectedService?.duration_minutes;
+  const bookableOnline = !!selectedService && isOnlineBookable(selectedService);
+  const lastBookableDate = addDays(todayIso(), windowDays);
 
   const categoryGroups = useMemo(() => groupServicesByCategory(services), [services]);
   const selectedCategory = categoryGroups.find((g) => g.slug === selectedCategorySlug) ?? null;
@@ -80,15 +110,15 @@ export default function BookingForm() {
   // a specific one just filters these same slots client-side, no extra round
   // trip, since each slot already names a concrete staff member.
   useEffect(() => {
-    if (step !== "time" || !selectedServiceId || !bookableOnline) return;
+    if (step !== "time" || !selectedServiceId || !selectedLocationId || !bookableOnline) return;
     setSlotsLoading(true);
     setSlotsError(null);
     setSelectedSlot(null);
-    getAvailability(selectedServiceId, date)
+    getAvailability(selectedServiceId, selectedLocationId, date)
       .then((res) => setSlots(res.slots))
       .catch(() => setSlotsError("Could not load availability. Please try a different date."))
       .finally(() => setSlotsLoading(false));
-  }, [step, selectedServiceId, date, bookableOnline]);
+  }, [step, selectedServiceId, selectedLocationId, date, bookableOnline]);
 
   const visibleSlots = filterSlotsByStaffMember(slots, selectedStaffMemberId);
   const slotStaffMemberIds = useMemo(() => new Set(slots.map((s) => s.staffMemberId)), [slots]);
@@ -102,10 +132,12 @@ export default function BookingForm() {
 
   const canAdvance = (() => {
     switch (step) {
+      case "location":
+        return !!selectedLocation && selectedLocation.hours.length > 0;
       case "service":
-        return !!selectedServiceId;
+        return !!selectedServiceId && bookableOnline;
       case "date":
-        return bookableOnline && !!date;
+        return bookableOnline && !!date && date <= lastBookableDate;
       case "time":
         return bookableOnline && !!selectedSlot;
       case "contact":
@@ -116,7 +148,7 @@ export default function BookingForm() {
   })();
 
   async function handleConfirm() {
-    if (!selectedService || !selectedSlot) return;
+    if (!selectedService || !selectedSlot || !selectedLocationId) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -125,6 +157,7 @@ export default function BookingForm() {
         client_id,
         service_id: selectedService.id,
         staff_member_id: selectedSlot.staffMemberId,
+        location_id: selectedLocationId,
         start_at: selectedSlot.startAt,
       });
 
@@ -134,6 +167,7 @@ export default function BookingForm() {
           bookingReference: booking_reference,
           clientId: client_id,
           serviceId: selectedService.id,
+          locationId: selectedLocationId,
           contact,
           summary,
         },
@@ -185,6 +219,38 @@ export default function BookingForm() {
         ))}
       </div>
 
+      {step === "location" && (
+        <div className="kaaya-card">
+          {locationsLoading && <p>Loading locations…</p>}
+          {locationsError && <p className="kaaya-error">{locationsError}</p>}
+          {!locationsLoading && !locationsError && (
+            <>
+              <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>Where would you like to visit?</p>
+              {locations.map((l) => {
+                const open = l.hours.length > 0;
+                return (
+                  <div
+                    key={l.id}
+                    className="kaaya-treatment-option"
+                    data-selected={selectedLocationId === l.id}
+                    aria-disabled={!open}
+                    style={open ? undefined : { opacity: 0.55, cursor: "default" }}
+                    onClick={() => open && setSelectedLocationId(l.id)}
+                  >
+                    <input type="radio" checked={selectedLocationId === l.id} disabled={!open} readOnly aria-label={l.name} />
+                    <span>
+                      {l.name}
+                      <br />
+                      <small style={{ color: "var(--kaaya-text-muted)" }}>{hoursToday(l)}</small>
+                    </span>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+
       {step === "service" && (
         <div className="kaaya-card">
           {servicesLoading && <p>Loading treatments…</p>}
@@ -221,25 +287,31 @@ export default function BookingForm() {
                 <span style={{ color: "var(--kaaya-accent)", fontWeight: 600 }}>← All categories</span>
               </div>
               <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>{selectedCategory.label}</p>
-              {selectedCategory.services.map((s) => (
-                <div
-                  key={s.id}
-                  className="kaaya-treatment-option"
-                  data-selected={selectedServiceId === s.id}
-                  onClick={() => setSelectedServiceId(s.id)}
-                >
-                  <input type="radio" checked={selectedServiceId === s.id} readOnly />
-                  <span>
-                    {s.name}
-                    <br />
-                    <small style={{ color: "var(--kaaya-text-muted)" }}>
-                      {s.price_is_from ? "from " : ""}
-                      {formatMoney(s.price_amount, s.price_currency)}
-                      {s.duration_minutes ? ` · ${formatDuration(s.duration_minutes)}` : " · call to book"}
-                    </small>
-                  </span>
-                </div>
-              ))}
+              {selectedCategory.services.map((s) => {
+                const online = isOnlineBookable(s);
+                return (
+                  <div
+                    key={s.id}
+                    className="kaaya-treatment-option"
+                    data-selected={selectedServiceId === s.id}
+                    aria-disabled={!online}
+                    style={online ? undefined : { opacity: 0.6, cursor: "default" }}
+                    onClick={() => online && setSelectedServiceId(s.id)}
+                  >
+                    <input type="radio" checked={selectedServiceId === s.id} disabled={!online} readOnly aria-label={s.name} />
+                    <span>
+                      {s.name}
+                      <br />
+                      <small style={{ color: "var(--kaaya-text-muted)" }}>
+                        {s.price_is_from ? "from " : ""}
+                        {formatMoney(s.price_amount, s.price_currency)}
+                        {s.duration_minutes ? ` · ${formatDuration(s.duration_minutes)}` : ""}
+                        {s.booking_mode === "walk_in_only" ? " · Walk-in only" : !s.duration_minutes ? " · call to book" : ""}
+                      </small>
+                    </span>
+                  </div>
+                );
+              })}
             </>
           )}
         </div>
@@ -255,7 +327,14 @@ export default function BookingForm() {
           ) : (
             <div className="kaaya-field">
               <label htmlFor="booking-date">Choose a date</label>
-              <input id="booking-date" type="date" min={todayIso()} value={date} onChange={(e) => setDate(e.target.value)} />
+              <input
+                id="booking-date"
+                type="date"
+                min={todayIso()}
+                max={lastBookableDate}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
             </div>
           )}
         </div>
@@ -359,6 +438,10 @@ export default function BookingForm() {
           <h2 style={{ marginTop: 0 }}>Booking summary</h2>
           <table className="kaaya-table">
             <tbody>
+              <tr>
+                <th>Location</th>
+                <td>{selectedLocation?.name}</td>
+              </tr>
               <tr>
                 <th>Treatment</th>
                 <td>{selectedService.name}</td>
