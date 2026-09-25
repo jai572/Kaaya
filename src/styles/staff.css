@@ -1165,6 +1165,48 @@
   padding-top: 4px;
 }
 
+/* checkout */
+.st-checkout-lines {
+  list-style: none;
+  margin: 0;
+  padding: 4px 12px;
+}
+.st-checkout-lines li {
+  display: grid;
+  grid-template-columns: 1fr 110px auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.st-checkout-lines li + li {
+  border-top: 1px solid var(--kaaya-border);
+}
+.st-checkout-desc {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.st-checkout-desc .st-muted {
+  font-size: 0.8rem;
+}
+.st-price {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.st-price .st-input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.st-price .st-input[aria-invalid="true"] {
+  border-color: var(--kaaya-high);
+}
+.st-checkout-add {
+  display: grid;
+  grid-template-columns: minmax(120px, 170px) 1fr;
+  gap: 8px;
+}
+
 /* old staff pages rendered inside the shell keep their own layout */
 .st-main > .kaaya-shell {
   margin-left: 0;

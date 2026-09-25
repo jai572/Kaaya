@@ -85,15 +85,11 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
 
   if (existingClient) {
     clientId = existingClient.id;
-    await admin
-      .from("clients")
-      .update({
-        first_name: submission.client.first_name,
-        last_name: submission.client.last_name,
-        phone: submission.client.phone,
-        address: submission.client.address ?? null,
-      })
-      .eq("id", clientId);
+    // Never overwrite a known client's details from a public form (anyone
+    // could type their email); only fill in an address we don't have yet.
+    if (submission.client.address) {
+      await admin.from("clients").update({ address: submission.client.address }).eq("id", clientId).is("address", null);
+    }
   } else {
     const { data: newClient, error: clientError } = await admin
       .from("clients")

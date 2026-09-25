@@ -74,7 +74,11 @@ function ReschedulePicker({
     setSubmitting(true);
     setError(null);
     try {
-      await staffRescheduleAppointment(appointmentId, slot.startAt, slot.staffMemberId);
+      const res = await staffRescheduleAppointment(appointmentId, slot.startAt, slot.staffMemberId);
+      if (res.needs_confirmation) {
+        setError(`${res.warnings.join(" ")} Use the Calendar to double-book on purpose.`);
+        return;
+      }
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not reschedule.");

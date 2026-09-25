@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import {
   staffApproveAppointment,
   staffCancelAppointment,
-  staffMarkCompleted,
   staffMarkNoShow,
   staffRescheduleAppointment,
   type CalendarAppointment,
@@ -16,6 +15,9 @@ import { apptTitle, money, STATUS_CHIP, STATUS_LABEL, staffColour } from "./shar
 
 type Mode = "view" | "reschedule" | "cancel";
 
+/** Thrown to keep the panel open without an error (e.g. waiting for a confirm). */
+class Stay extends Error {}
+
 export default function AppointmentPanel({
   appointment: a,
   data,
@@ -23,6 +25,7 @@ export default function AppointmentPanel({
   onChanged,
   onOpenOther,
   onBookNext,
+  onCheckout,
 }: {
   appointment: CalendarAppointment;
   data: CalendarData;
@@ -30,6 +33,7 @@ export default function AppointmentPanel({
   onChanged: () => void;
   onOpenOther: (a: CalendarAppointment) => void;
   onBookNext: (a: CalendarAppointment) => void;
+  onCheckout: (a: CalendarAppointment) => void;
 }) {
   const [mode, setMode] = useState<Mode>("view");
   const [busy, setBusy] = useState(false);
@@ -39,11 +43,13 @@ export default function AppointmentPanel({
   const [newTime, setNewTime] = useState(clockTime(a.scheduled_at));
   const [newStaff, setNewStaff] = useState(a.staff_member_id);
   const [reason, setReason] = useState("");
+  const [moveWarnings, setMoveWarnings] = useState<string[] | null>(null);
 
   const staff = new Map(data.staff.map((s) => [s.id, s]));
   const member = staff.get(a.staff_member_id);
   const minutes = Math.round((Date.parse(a.end_at) - Date.parse(a.scheduled_at)) / 60000);
   const started = Date.now() >= Date.parse(a.scheduled_at);
+  const dueToday = start.date <= londonDayMinutes(new Date().toISOString()).date;
   const active = a.status === "pending_approval" || a.status === "confirmed";
   const visitParts = a.visit_id
     ? data.appointments.filter((x) => x.visit_id === a.visit_id && x.id !== a.id && x.status !== "cancelled")
@@ -59,7 +65,7 @@ export default function AppointmentPanel({
       await fn();
       onChanged();
     } catch (e) {
-      setError(errorMessage(e, "Something went wrong"));
+      if (!(e instanceof Stay)) setError(errorMessage(e, "Something went wrong"));
     } finally {
       setBusy(false);
     }
@@ -75,9 +81,17 @@ export default function AppointmentPanel({
           type="button"
           className="st-btn"
           disabled={busy || !newDate || !newTime}
-          onClick={() => run(() => staffRescheduleAppointment(a.id, londonWallToIso(newDate, newTime), newStaff))}
+          onClick={() =>
+            run(async () => {
+              const res = await staffRescheduleAppointment(a.id, londonWallToIso(newDate, newTime), newStaff, !!moveWarnings);
+              if (res.needs_confirmation) {
+                setMoveWarnings(res.warnings);
+                throw new Stay();
+              }
+            })
+          }
         >
-          {busy ? "Moving…" : "Move appointment"}
+          {busy ? "Moving…" : moveWarnings ? "Double-book anyway" : "Move appointment"}
         </button>
       </>
     ) : mode === "cancel" ? (
@@ -97,14 +111,14 @@ export default function AppointmentPanel({
           </button>
         )}
         {a.status === "confirmed" && started && (
-          <>
-            <button type="button" className="st-btn st-btn--ghost" disabled={busy} onClick={() => run(() => staffMarkNoShow(a.id))}>
-              No-show
-            </button>
-            <button type="button" className="st-btn" disabled={busy} onClick={() => run(() => staffMarkCompleted(a.id))}>
-              Complete
-            </button>
-          </>
+          <button type="button" className="st-btn st-btn--ghost" disabled={busy} onClick={() => run(() => staffMarkNoShow(a.id))}>
+            No-show
+          </button>
+        )}
+        {a.status === "confirmed" && dueToday && (
+          <button type="button" className="st-btn" disabled={busy} onClick={() => onCheckout(a)}>
+            Checkout
+          </button>
         )}
       </>
     ) : undefined;
@@ -115,6 +129,13 @@ export default function AppointmentPanel({
         <span className={STATUS_CHIP[a.status]}>{STATUS_LABEL[a.status]}</span>
         <span className="st-chip">{a.booking_source === "staff" ? "Booked by staff" : "Booked online"}</span>
         {a.patch_test && <span className="st-chip st-chip--warn">Patch test needed</span>}
+        {a.allow_overlap && <span className="st-chip">Double-booked on purpose</span>}
+        {a.sale && (
+          <span className="st-chip st-chip--ok">
+            Paid {money(a.sale.total_amount)} · {a.sale.payment_method}
+            {a.sale.payment_note ? ` (${a.sale.payment_note})` : ""}
+          </span>
+        )}
       </div>
 
       {a.clients && (
@@ -187,16 +208,16 @@ export default function AppointmentPanel({
           <div className="st-grid-2">
             <div className="st-field">
               <label htmlFor="mv-date">Date</label>
-              <input id="mv-date" className="st-input" type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+              <input id="mv-date" className="st-input" type="date" value={newDate} onChange={(e) => { setNewDate(e.target.value); setMoveWarnings(null); }} />
             </div>
             <div className="st-field">
               <label htmlFor="mv-time">Start</label>
-              <input id="mv-time" className="st-input" type="time" step={300} value={newTime} onChange={(e) => setNewTime(e.target.value)} />
+              <input id="mv-time" className="st-input" type="time" step={300} value={newTime} onChange={(e) => { setNewTime(e.target.value); setMoveWarnings(null); }} />
             </div>
           </div>
           <div className="st-field">
             <label htmlFor="mv-staff">With</label>
-            <select id="mv-staff" className="st-select" value={newStaff} onChange={(e) => setNewStaff(e.target.value)}>
+            <select id="mv-staff" className="st-select" value={newStaff} onChange={(e) => { setNewStaff(e.target.value); setMoveWarnings(null); }}>
               {data.staff
                 .filter((s) => s.active || s.id === a.staff_member_id)
                 .map((s) => (
@@ -207,6 +228,14 @@ export default function AppointmentPanel({
             </select>
           </div>
           <span className="st-hint">Staff can move bookings to any time. Same length ({durationLabel(minutes)}), same location.</span>
+          {moveWarnings && (
+            <div className="st-note st-note--warn" role="alert">
+              {moveWarnings.map((w) => (
+                <div key={w}>{w}</div>
+              ))}
+              Press “Double-book anyway” if both clients will be seen at once.
+            </div>
+          )}
         </div>
       )}
 

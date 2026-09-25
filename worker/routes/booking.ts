@@ -203,25 +203,23 @@ export async function lookupOrCreateCustomer(request: Request, env: Env): Promis
     .maybeSingle();
   if (lookupError) return errorResponse(lookupError.message, 500);
 
-  let clientId: string;
-  if (existingClient) {
-    clientId = existingClient.id;
-    const { error: updateError } = await admin
-      .from("clients")
-      .update({ first_name: contact.first_name, last_name: contact.last_name, phone: contact.phone })
-      .eq("id", clientId);
-    if (updateError) return errorResponse(updateError.message, 500);
-  } else {
-    const { data: newClient, error: clientError } = await admin
-      .from("clients")
-      .insert({ first_name: contact.first_name, last_name: contact.last_name, email, phone: contact.phone })
-      .select("id")
-      .single();
-    if (clientError || !newClient) return errorResponse(clientError?.message ?? "Could not create client", 500);
-    clientId = newClient.id;
-  }
+  // An existing client's stored details are never changed from this public
+  // form: knowing someone's email must not let anyone rename them or swap
+  // their phone number. Staff update details from the client record.
+  if (existingClient) return json({ client_id: existingClient.id });
 
-  return json({ client_id: clientId });
+  const { data: newClient, error: clientError } = await admin
+    .from("clients")
+    .insert({ first_name: contact.first_name, last_name: contact.last_name, email, phone: contact.phone })
+    .select("id")
+    .single();
+  if (clientError?.code === "23505") {
+    // Created by a parallel request a moment ago -- same person.
+    const { data: raced } = await admin.from("clients").select("id").eq("email", email).maybeSingle();
+    if (raced) return json({ client_id: raced.id });
+  }
+  if (clientError || !newClient) return errorResponse(clientError?.message ?? "Could not create client", 500);
+  return json({ client_id: newClient.id });
 }
 
 export async function createAppointment(request: Request, env: Env): Promise<Response> {

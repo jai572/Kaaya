@@ -30,6 +30,7 @@ import AppointmentPanel from "./AppointmentPanel";
 import NewAppointmentDrawer, { type NewAppointmentPrefill } from "./NewAppointmentDrawer";
 import { BlockPanel, NewBlockDrawer } from "./BlockDrawers";
 import ViewDrawer from "./ViewDrawer";
+import CheckoutDrawer from "./CheckoutDrawer";
 import { loadPrefs, savePrefs, statusVisible, staffColour, type CalendarPrefs, type CalendarView } from "./shared";
 
 type Open =
@@ -38,6 +39,7 @@ type Open =
   | { kind: "new"; prefill: NewAppointmentPrefill }
   | { kind: "newBlock"; prefill: { date: string; time: string; staffId: string | null } }
   | { kind: "view" }
+  | { kind: "checkout"; appointment: CalendarAppointment | null }
   | null;
 
 const VIEWS: { value: CalendarView; label: string }[] = [
@@ -271,6 +273,9 @@ export default function StaffCalendar() {
           <button type="button" className="st-btn st-btn--ghost st-btn--sm" onClick={() => setOpen({ kind: "view" })}>
             View
           </button>
+          <button type="button" className="st-btn st-btn--ghost st-btn--sm" disabled={!fresh} onClick={() => setOpen({ kind: "checkout", appointment: null })}>
+            Walk-in sale
+          </button>
           <button
             type="button"
             className="st-btn st-btn--ghost st-btn--sm"
@@ -325,6 +330,7 @@ export default function StaffCalendar() {
           onChanged={afterChange}
           onOpenOther={(a) => setOpen({ kind: "appt", id: a.id })}
           onBookNext={bookNext}
+          onCheckout={(a) => setOpen({ kind: "checkout", appointment: a })}
         />
       )}
       {open?.kind === "block" && fresh && <BlockPanel block={open.block} data={fresh} onClose={() => setOpen(null)} onDeleted={afterChange} />}
@@ -332,6 +338,9 @@ export default function StaffCalendar() {
         <NewAppointmentDrawer data={fresh} services={services} links={links} prefill={open.prefill} onClose={() => setOpen(null)} onBooked={afterChange} />
       )}
       {open?.kind === "newBlock" && fresh && <NewBlockDrawer data={fresh} prefill={open.prefill} onClose={() => setOpen(null)} onSaved={afterChange} />}
+      {open?.kind === "checkout" && fresh && (
+        <CheckoutDrawer data={fresh} services={services} appointment={open.appointment} onClose={() => setOpen(null)} onDone={afterChange} />
+      )}
       {open?.kind === "view" && (
         <ViewDrawer prefs={prefs} data={fresh} autoStaffIds={autoStaffIds} onChange={updatePrefs} onClose={() => setOpen(null)} />
       )}

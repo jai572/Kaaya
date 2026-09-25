@@ -76,3 +76,10 @@ export function sanitiseSearch(q: string): string {
     .trim()
     .slice(0, 60);
 }
+
+const clockFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/** "10:30" London clock time for a UTC instant. */
+export function londonClock(iso: string): string {
+  return clockFmt.format(new Date(iso));
+}

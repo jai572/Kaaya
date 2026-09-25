@@ -61,7 +61,9 @@ import {
   deleteTimeBlock,
   searchClients,
   staffCreateClient,
+  staffUpdateClient,
 } from "./routes/staffCalendar";
+import { checkout } from "./routes/checkout";
 import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -222,6 +224,7 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
     return resolveChangeRequest(request, env, resolveChangeRequestMatch[1]);
   }
 
+  if (path === "/api/staff/checkout" && method === "POST") return checkout(request, env);
   if (path === "/api/staff/calendar" && method === "GET") return getCalendar(request, env, url);
   if (path === "/api/staff/calendar/appointments" && method === "POST") return staffCreateAppointments(request, env);
   if (path === "/api/staff/calendar/blocks" && method === "POST") return createTimeBlock(request, env);
@@ -231,6 +234,7 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (path === "/api/staff/clients" && method === "POST") return staffCreateClient(request, env);
 
   const clientRecordMatch = path.match(/^\/api\/staff\/clients\/([^/]+)$/);
+  if (clientRecordMatch && method === "PATCH") return staffUpdateClient(request, env, clientRecordMatch[1]);
   if (clientRecordMatch && method === "GET") {
     return getClientRecord(request, env, clientRecordMatch[1]);
   }

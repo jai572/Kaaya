@@ -152,7 +152,7 @@ export default function NewAppointmentDrawer({
   );
 }
 
-function ClientPicker({ client, onChange, locked }: { client: ClientSummary | null; onChange: (c: ClientSummary | null) => void; locked: boolean }) {
+export function ClientPicker({ client, onChange, locked }: { client: ClientSummary | null; onChange: (c: ClientSummary | null) => void; locked: boolean }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<ClientSummary[]>([]);
   const [searching, setSearching] = useState(false);

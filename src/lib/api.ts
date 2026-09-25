@@ -397,13 +397,13 @@ export async function staffCancelAppointment(id: string, reason?: string) {
   }) as Promise<{ status: "cancelled" }>;
 }
 
-export async function staffRescheduleAppointment(id: string, newStartAt: string, newStaffMemberId?: string) {
+export async function staffRescheduleAppointment(id: string, newStartAt: string, newStaffMemberId?: string, allowOverlap?: boolean) {
   const headers = await staffAuthHeader();
   return request(`/api/staff/booking/appointments/${id}/reschedule`, {
     method: "PATCH",
     headers,
-    body: JSON.stringify({ new_start_at: newStartAt, new_staff_member_id: newStaffMemberId }),
-  }) as Promise<{ status: "rescheduled"; new_appointment_id: string }>;
+    body: JSON.stringify({ new_start_at: newStartAt, new_staff_member_id: newStaffMemberId, allow_overlap: allowOverlap }),
+  }) as Promise<{ status: "rescheduled"; new_appointment_id: string; needs_confirmation?: undefined } | { needs_confirmation: true; warnings: string[] }>;
 }
 
 export async function staffMarkCompleted(id: string) {
@@ -456,7 +456,7 @@ export async function staffResolveChangeRequest(id: string, decision: "approve" 
 }
 
 export interface ClientRecord {
-  client: { id: string; first_name: string; last_name: string; email: string; phone: string };
+  client: { id: string; first_name: string; last_name: string; email: string | null; phone: string };
   appointments: StaffAppointmentRow[];
   consultations: { id: string; status: string; submitted_at: string | null; created_at: string }[];
 }
@@ -680,6 +680,9 @@ export interface CalendarAppointment {
   booking_source: string;
   consultation_id: string | null;
   patch_test: boolean;
+  allow_overlap: boolean;
+  sale_id: string | null;
+  sale: { total_amount: number; payment_method: PaymentMethod; payment_note: string | null } | null;
   clients: { first_name: string; last_name: string; phone: string; email: string | null } | null;
   appointment_items: CalendarItem[];
 }
@@ -772,4 +775,33 @@ export async function staffCreateClient(input: { first_name: string; last_name: 
     client: ClientSummary;
     existing: boolean;
   }>;
+}
+
+export async function staffUpdateClient(id: string, input: { first_name: string; last_name: string; phone: string; email?: string | null }) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/clients/${id}`, { method: "PATCH", headers, body: JSON.stringify(input) }) as Promise<{ client: ClientSummary }>;
+}
+
+export type PaymentMethod = "cash" | "card" | "voucher" | "other";
+
+export interface CheckoutLine {
+  service_id: string | null;
+  appointment_id: string | null;
+  staff_member_id: string | null;
+  description: string;
+  quantity: number;
+  unit_price_amount: number;
+}
+
+export async function staffCheckout(input: {
+  location_id: string;
+  client_id: string | null;
+  appointment_ids: string[];
+  items: CheckoutLine[];
+  discount_amount: number;
+  payment_method: PaymentMethod;
+  payment_note: string | null;
+}) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/checkout", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{ sale_id: string; total_amount: number }>;
 }

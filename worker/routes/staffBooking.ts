@@ -3,12 +3,14 @@ import { adminClient } from "../lib/supabase";
 import { json, errorResponse } from "../lib/http";
 import { requireStaff, requireRole, requireCapability, hasCapability, AuthError, type FeatureKey, type StaffContext } from "../lib/auth";
 import { recordAuditEvent } from "../lib/audit";
+import { londonClock } from "../lib/calendar";
 import {
   performApprove,
   performCancel,
   performComplete,
   performNoShow,
   performReschedule,
+  findOverlaps,
   LifecycleError,
   NON_BLOCKING_STATUSES,
   sumAppointmentRevenue,
@@ -382,11 +384,35 @@ export async function rescheduleAppointment(request: Request, env: Env, appointm
 
     const admin = adminClient(env);
     try {
+      // Moving onto someone's existing booking double-books them: allowed
+      // for staff, but only after they've seen and confirmed it.
+      const { data: current, error: currentError } = await admin
+        .from("appointments")
+        .select("staff_member_id, scheduled_at, end_at")
+        .eq("id", appointmentId)
+        .maybeSingle();
+      if (currentError) return errorResponse(currentError.message, 500);
+      if (!current) return errorResponse("Appointment not found", 404);
+      const startMs = Date.parse(parsed.data.new_start_at);
+      const clashes = await findOverlaps(admin, {
+        staffMemberId: parsed.data.new_staff_member_id ?? current.staff_member_id,
+        startAtIso: new Date(startMs).toISOString(),
+        endAtIso: new Date(startMs + Date.parse(current.end_at) - Date.parse(current.scheduled_at)).toISOString(),
+        excludeAppointmentId: appointmentId,
+      });
+      if (clashes.length > 0 && !parsed.data.allow_overlap) {
+        return json({
+          needs_confirmation: true,
+          warnings: clashes.map((c) => `Already booked at ${londonClock(c.scheduled_at)} — moving here would double-book.`),
+        });
+      }
+
       const { newAppointmentId } = await performReschedule(admin, {
         appointmentId,
         actor: { actorId: staff.id, actorType: "staff" },
         newStartAtIso: parsed.data.new_start_at,
         newStaffMemberId: parsed.data.new_staff_member_id,
+        allowOverlap: clashes.length > 0,
       });
       return json({ status: "rescheduled", new_appointment_id: newAppointmentId });
     } catch (e) {

@@ -5,8 +5,8 @@ import { hasCapability, type StaffContext } from "../lib/auth";
 import { recordAuditEvent } from "../lib/audit";
 import { londonDateIso } from "../lib/availability";
 import { expandDateRange } from "../lib/rota";
-import { shiftsForRange, staffBookingWarnings, sanitiseSearch, type Shift } from "../lib/calendar";
-import { validateSlotSafeguards } from "../lib/bookingLifecycle";
+import { shiftsForRange, staffBookingWarnings, sanitiseSearch, londonClock, overlaps, type Shift } from "../lib/calendar";
+import { validateSlotSafeguards, findOverlaps } from "../lib/bookingLifecycle";
 import {
   calendarQuerySchema,
   staffCreateAppointmentsSchema,
@@ -27,7 +27,7 @@ async function readJson(request: Request): Promise<unknown | Response> {
 }
 
 /** Own column always; anyone else's needs manage_all_bookings. */
-async function canActFor(env: Env, staff: StaffContext, staffMemberIds: string[]): Promise<boolean> {
+export async function canActFor(env: Env, staff: StaffContext, staffMemberIds: string[]): Promise<boolean> {
   if (await hasCapability(env, staff, "manage_all_bookings", ["admin", "owner"])) return true;
   const ownId = await ownStaffMemberId(env, staff.id);
   return !!ownId && staffMemberIds.every((id) => id === ownId);
@@ -69,7 +69,7 @@ export async function getCalendar(request: Request, env: Env, url: URL): Promise
       admin
         .from("appointments")
         .select(
-          "id, client_id, staff_member_id, service_id, service_name, duration_minutes, price_amount, price_currency, status, scheduled_at, end_at, visit_id, booking_source, consultation_id, clients(first_name, last_name, phone, email), appointment_items(id, service_id, service_name, duration_minutes, price_amount, staff_member_id)"
+          "id, client_id, staff_member_id, service_id, service_name, duration_minutes, price_amount, price_currency, status, scheduled_at, end_at, visit_id, booking_source, consultation_id, allow_overlap, sale_id, clients(first_name, last_name, phone, email), appointment_items(id, service_id, service_name, duration_minutes, price_amount, staff_member_id), sale:sales!appointments_sale_id_fkey(total_amount, payment_method, payment_note)"
         )
         .eq("location_id", location_id)
         .neq("status", "rescheduled")
@@ -210,9 +210,22 @@ export async function staffCreateAppointments(request: Request, env: Env): Promi
       if (err) return errorResponse(`${staffById.get(b.staff_member_id)!.display_name}: ${err}`, 400);
     }
 
-    // Heads-ups (rota, blocked time, past) -- shown once, never blocking.
+    // Double-booking one person is allowed for staff (e.g. threading while a
+    // tint develops), but only once they've seen it and confirmed.
+    const clashWarnings: string[] = [];
+    const doubleBooked: boolean[] = [];
+    for (const [i, b] of built.entries()) {
+      const name = staffById.get(b.staff_member_id)!.display_name;
+      const existing = await findOverlaps(admin, { staffMemberId: b.staff_member_id, startAtIso: b.start_at, endAtIso: b.end_at });
+      const sameRequest = built.slice(0, i).filter((o) => o.staff_member_id === b.staff_member_id && overlaps(o, b));
+      doubleBooked.push(existing.length > 0 || sameRequest.length > 0);
+      for (const e of existing) clashWarnings.push(`${name} already has a booking at ${londonClock(e.scheduled_at)} — this would double-book them.`);
+      if (sameRequest.length) clashWarnings.push(`Two of these treatments overlap for ${name} — this would double-book them.`);
+    }
+
+    // Heads-ups (rota, blocked time, past, double-booking) -- shown once, never blocking.
     if (!input.confirm_warnings) {
-      const warnings: string[] = [];
+      const warnings: string[] = [...clashWarnings];
       for (const b of built) {
         const date = londonDateIso(b.start_at);
         const [regularRes, exceptionRes, openingRes, blocksRes] = await Promise.all([
@@ -270,10 +283,11 @@ export async function staffCreateAppointments(request: Request, env: Env): Promi
       }
     };
 
-    for (const b of built) {
+    for (const [i, b] of built.entries()) {
       const { data, error } = await admin
         .from("appointments")
         .insert({
+          allow_overlap: doubleBooked[i],
           client_id: input.client_id,
           service_id: b.services[0].id,
           staff_member_id: b.staff_member_id,
@@ -425,6 +439,7 @@ export async function staffCreateClient(request: Request, env: Env): Promise<Res
       .insert({ first_name: c.first_name, last_name: c.last_name, phone: c.phone, email: c.email })
       .select("id, first_name, last_name, phone, email")
       .single();
+    if (error?.code === "23505") return errorResponse("Another client already uses this email — search for them instead.", 409);
     if (error || !data) return errorResponse(error?.message ?? "Could not add client", 500);
 
     await recordAuditEvent(admin, {
@@ -434,5 +449,34 @@ export async function staffCreateClient(request: Request, env: Env): Promise<Res
       metadata: { client_id: data.id },
     });
     return json({ client: data, existing: false }, 201);
+  });
+}
+
+export async function staffUpdateClient(request: Request, env: Env, clientId: string): Promise<Response> {
+  return withStaff(request, env, async (staff) => {
+    const body = await readJson(request);
+    if (body instanceof Response) return body;
+    const parsed = staffCreateClientSchema.safeParse(body);
+    if (!parsed.success) return errorResponse(parsed.error.issues.map((i) => i.message).join("; "));
+    const c = parsed.data;
+
+    const admin = adminClient(env);
+    const { data, error } = await admin
+      .from("clients")
+      .update({ first_name: c.first_name, last_name: c.last_name, phone: c.phone, email: c.email, updated_at: new Date().toISOString() })
+      .eq("id", clientId)
+      .select("id, first_name, last_name, phone, email")
+      .maybeSingle();
+    if (error?.code === "23505") return errorResponse("Another client already uses this email.", 409);
+    if (error) return errorResponse(error.message, 500);
+    if (!data) return errorResponse("Client not found", 404);
+
+    await recordAuditEvent(admin, {
+      actor_id: staff.id,
+      actor_type: "staff",
+      event_type: "client_updated",
+      metadata: { client_id: clientId },
+    });
+    return json({ client: data });
   });
 }

@@ -50,6 +50,7 @@ export const staffCancelAppointmentSchema = z.object({
 export const staffRescheduleAppointmentSchema = z.object({
   new_start_at: z.string().datetime({ offset: true }),
   new_staff_member_id: z.string().uuid().optional(),
+  allow_overlap: z.boolean().optional(),
 });
 
 export const resolveChangeRequestSchema = z.object({
@@ -237,3 +238,36 @@ export const staffCreateClientSchema = z.object({
     .transform((v) => (v ? v : null))
     .refine((v) => v === null || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), { message: "Enter a valid email" }),
 });
+
+export const checkoutSchema = z
+  .object({
+    location_id: z.string().uuid(),
+    client_id: z.string().uuid().nullable().optional(),
+    appointment_ids: z.array(z.string().uuid()).max(10).default([]),
+    items: z
+      .array(
+        z.object({
+          service_id: z.string().uuid().nullable().optional(),
+          appointment_id: z.string().uuid().nullable().optional(),
+          staff_member_id: z.string().uuid().nullable().optional(),
+          description: z.string().trim().min(1).max(200),
+          quantity: z.number().int().min(1).max(50).default(1),
+          unit_price_amount: z.number().int().min(0).max(1_000_000),
+        })
+      )
+      .min(1, "Add at least one item")
+      .max(40),
+    discount_amount: z.number().int().min(0).default(0),
+    payment_method: z.enum(["cash", "card", "voucher", "other"]),
+    payment_note: z
+      .string()
+      .trim()
+      .max(200)
+      .nullable()
+      .optional()
+      .transform((v) => (v ? v : null)),
+  })
+  .refine((c) => c.payment_method !== "voucher" || !!c.payment_note, { message: "Enter the voucher number" })
+  .refine((c) => c.items.every((i) => !i.appointment_id || c.appointment_ids.includes(i.appointment_id)), {
+    message: "Item belongs to an appointment that isn't being checked out",
+  });

@@ -80,6 +80,26 @@ interface AppointmentRow {
   visit_id: string | null;
 }
 
+/** Active appointments for one staff member that overlap an interval.
+ * Needed in code (not just the DB constraint) because staff can knowingly
+ * double-book (allow_overlap rows sit outside the constraint). */
+export async function findOverlaps(
+  admin: SupabaseClient,
+  params: { staffMemberId: string; startAtIso: string; endAtIso: string; excludeAppointmentId?: string }
+): Promise<{ id: string; scheduled_at: string }[]> {
+  let query = admin
+    .from("appointments")
+    .select("id, scheduled_at")
+    .eq("staff_member_id", params.staffMemberId)
+    .not("status", "in", `(${NON_BLOCKING_STATUSES.join(",")})`)
+    .lt("scheduled_at", params.endAtIso)
+    .gt("end_at", params.startAtIso);
+  if (params.excludeAppointmentId) query = query.neq("id", params.excludeAppointmentId);
+  const { data, error } = await query;
+  if (error) throw new LifecycleError(error.message, 500);
+  return data ?? [];
+}
+
 /** Re-validates a specific requested slot server-side. The availability
  * endpoint's slot list is the common-case UX; this is the actual gate on
  * every write. Always: the staff member must be linked to the service.
@@ -98,9 +118,10 @@ export async function validateSlotSafeguards(
     endAtIso: string;
     nowIso?: string;
     enforceRota?: boolean;
+    excludeAppointmentId?: string;
   }
 ): Promise<string | null> {
-  const { serviceIds, staffMemberId, locationId, startAtIso, endAtIso, nowIso, enforceRota = true } = params;
+  const { serviceIds, staffMemberId, locationId, startAtIso, endAtIso, nowIso, enforceRota = true, excludeAppointmentId } = params;
 
   const { data: links, error: linkError } = await admin
     .from("service_staff")
@@ -141,6 +162,9 @@ export async function validateSlotSafeguards(
     .limit(1);
   if (blockError) return blockError.message;
   if ((blocks ?? []).length > 0) return "That time isn't available with this staff member at this location.";
+
+  const clashes = await findOverlaps(admin, { staffMemberId, startAtIso, endAtIso, excludeAppointmentId });
+  if (clashes.length > 0) return "That time was just booked — please pick another slot.";
 
   return null;
 }
@@ -288,9 +312,11 @@ export async function performReschedule(
     newStartAtIso: string;
     newStaffMemberId?: string;
     reason?: string | null;
+    allowOverlap?: boolean; // staff only: knowingly double-book
   }
 ): Promise<{ newAppointmentId: string }> {
   const { appointmentId, actor, newStartAtIso, newStaffMemberId, reason } = params;
+  const allowOverlap = actor.actorType === "staff" && !!params.allowOverlap;
   const appointment = await loadAppointment(admin, appointmentId);
   assertTransition(appointment.status, "rescheduled");
 
@@ -313,6 +339,7 @@ export async function performReschedule(
     startAtIso: newStartAtIso,
     endAtIso: newEndAtIso,
     enforceRota: actor.actorType !== "staff",
+    excludeAppointmentId: appointmentId,
   });
   if (safeguardError) throw new LifecycleError(safeguardError, 400);
 
@@ -349,6 +376,7 @@ export async function performReschedule(
       booking_source: appointment.booking_source,
       location_id: appointment.location_id,
       visit_id: appointment.visit_id,
+      allow_overlap: allowOverlap,
       status: newStatus,
       scheduled_at: newStartAtIso,
       end_at: newEndAtIso,

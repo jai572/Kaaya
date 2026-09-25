@@ -1,108 +1,178 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { supabase } from "../../lib/supabaseClient";
-import { staffGetClientRecord, type ClientRecord, type AppointmentStatus } from "../../lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { staffGetClientRecord, staffUpdateClient, type ClientRecord } from "../../lib/api";
 import { formatMoney } from "../../lib/bookingFormat";
-
-const STATUS_LABEL: Record<AppointmentStatus, string> = {
-  pending_approval: "Pending approval",
-  confirmed: "Confirmed",
-  completed: "Completed",
-  no_show: "No-show",
-  cancelled: "Cancelled",
-  rescheduled: "Rescheduled",
-};
-
-const STATUS_BADGE: Record<AppointmentStatus, string> = {
-  pending_approval: "MEDIUM",
-  confirmed: "INFORMATION",
-  completed: "INFORMATION",
-  no_show: "HIGH",
-  cancelled: "INFORMATION",
-  rescheduled: "INFORMATION",
-};
+import { PageHead, errorMessage } from "../../components/staff/ui";
+import { STATUS_CHIP, STATUS_LABEL } from "./calendar/shared";
 
 export default function StaffClientRecord() {
   const { clientId } = useParams<{ clientId: string }>();
-  const navigate = useNavigate();
   const [record, setRecord] = useState<ClientRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "" });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        navigate("/staff/login");
-        return;
-      }
-      staffGetClientRecord(clientId!)
-        .then(setRecord)
-        .catch((e) => setError(e instanceof Error ? e.message : "Could not load this client"));
-    });
-  }, [navigate, clientId]);
+  const load = useCallback(() => {
+    staffGetClientRecord(clientId!)
+      .then(setRecord)
+      .catch((e) => setError(errorMessage(e, "Could not load this client")));
+  }, [clientId]);
 
+  useEffect(load, [load]);
+
+  function startEdit() {
+    if (!record) return;
+    const c = record.client;
+    setForm({ first_name: c.first_name, last_name: c.last_name, phone: c.phone, email: c.email ?? "" });
+    setSaveError(null);
+    setEditing(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await staffUpdateClient(clientId!, { ...form, email: form.email.trim() || null });
+      setEditing(false);
+      load();
+    } catch (e) {
+      setSaveError(errorMessage(e, "Could not save"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const c = record?.client;
   return (
-    <div className="kaaya-shell kaaya-shell--wide">
-      <div className="kaaya-header">
-        <h1>Kaaya — Client record</h1>
-      </div>
-      <p>
-        <Link to="/staff/bookings">← Back to bookings</Link> · <Link to="/staff">Consultations</Link>
-      </p>
+    <div className="st-page">
+      <PageHead
+        title={c ? `${c.first_name} ${c.last_name}`.trim() : "Client"}
+        subtitle="Contact details, appointments and consultation forms"
+        actions={<Link to="/staff/calendar">← Calendar</Link>}
+      />
+      {error && <p className="st-error">{error}</p>}
 
-      {error && <p className="kaaya-error">{error}</p>}
+      {c && (
+        <div className="st-card">
+          <div className="st-card-head">
+            <h2>Details</h2>
+            {!editing && (
+              <button type="button" className="st-btn st-btn--ghost st-btn--sm" onClick={startEdit}>
+                Edit details
+              </button>
+            )}
+          </div>
+          <div className="st-card-body">
+            {editing ? (
+              <>
+                <div className="st-grid-2">
+                  <div className="st-field">
+                    <label htmlFor="cr-first">First name</label>
+                    <input id="cr-first" className="st-input" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
+                  </div>
+                  <div className="st-field">
+                    <label htmlFor="cr-last">Last name</label>
+                    <input id="cr-last" className="st-input" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
+                  </div>
+                  <div className="st-field">
+                    <label htmlFor="cr-phone">Phone</label>
+                    <input id="cr-phone" className="st-input" type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                  </div>
+                  <div className="st-field">
+                    <label htmlFor="cr-email">Email (optional)</label>
+                    <input id="cr-email" className="st-input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                  </div>
+                </div>
+                {saveError && <p className="st-error">{saveError}</p>}
+                <div className="st-btn-row">
+                  <button type="button" className="st-btn st-btn--ghost" onClick={() => setEditing(false)} disabled={saving}>
+                    Cancel
+                  </button>
+                  <button type="button" className="st-btn" onClick={save} disabled={saving || !form.first_name.trim() || form.phone.trim().length < 5}>
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <dl className="st-panel-dl">
+                <dt>Phone</dt>
+                <dd>
+                  <a href={`tel:${c.phone.replace(/\s+/g, "")}`}>{c.phone}</a>
+                </dd>
+                <dt>Email</dt>
+                <dd>{c.email ?? <span className="st-muted">Not given</span>}</dd>
+              </dl>
+            )}
+            <span className="st-hint">
+              Online booking and consultation forms never change these details — if a client's number or name changes, update it here.
+            </span>
+          </div>
+        </div>
+      )}
 
       {record && (
-        <>
-          <div className="kaaya-card">
-            <h2 style={{ marginTop: 0, fontSize: "1rem" }}>
-              {record.client.first_name} {record.client.last_name}
-            </h2>
-            <p style={{ color: "var(--kaaya-text-muted)", margin: 0 }}>
-              {record.client.email} · {record.client.phone}
-            </p>
+        <div className="st-card">
+          <div className="st-card-head">
+            <h2>Appointments</h2>
           </div>
+          {record.appointments.length === 0 ? (
+            <p className="st-empty">No appointments yet.</p>
+          ) : (
+            <div className="st-table-wrap">
+              <table className="st-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Treatment</th>
+                    <th>Price</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...record.appointments].reverse().map((a) => (
+                    <tr key={a.id}>
+                      <td className="st-num">
+                        {new Date(a.scheduled_at).toLocaleString("en-GB", {
+                          timeZone: "Europe/London",
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td>{a.service_name}</td>
+                      <td className="st-num">{formatMoney(a.price_amount, a.price_currency)}</td>
+                      <td>
+                        <span className={STATUS_CHIP[a.status]}>{STATUS_LABEL[a.status]}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
-          <div className="kaaya-card">
-            <h2 style={{ marginTop: 0, fontSize: "1rem" }}>Appointments</h2>
-            {record.appointments.length === 0 && <p>No appointments yet.</p>}
-            {record.appointments.map((a) => (
-              <div key={a.id} style={{ borderBottom: "1px solid var(--kaaya-border)", padding: "10px 0" }}>
-                <strong>
-                  {new Date(a.scheduled_at).toLocaleString("en-GB", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </strong>
-                <span style={{ marginLeft: 8 }}>{a.service_name}</span>
-                <span style={{ marginLeft: 8, color: "var(--kaaya-text-muted)" }}>
-                  {formatMoney(a.price_amount, a.price_currency)}
-                </span>
-                <span className={`kaaya-badge kaaya-badge--${STATUS_BADGE[a.status]}`} style={{ marginLeft: 8 }}>
-                  {STATUS_LABEL[a.status]}
-                </span>
-                {a.status === "rescheduled" && a.rescheduled_to_id && (
-                  <div style={{ color: "var(--kaaya-text-muted)", fontSize: "0.85rem" }}>
-                    Rescheduled to a new appointment below.
-                  </div>
-                )}
-              </div>
-            ))}
+      {record && (
+        <div className="st-card">
+          <div className="st-card-head">
+            <h2>Consultation forms</h2>
           </div>
-
-          <div className="kaaya-card">
-            <h2 style={{ marginTop: 0, fontSize: "1rem" }}>Consultations</h2>
-            {record.consultations.length === 0 && <p>No consultations yet.</p>}
-            {record.consultations.map((c) => (
-              <Link key={c.id} to={`/staff/consultations/${c.id}`} className="kaaya-list-row" style={{ padding: "10px 0" }}>
-                <strong>{c.submitted_at ? new Date(c.submitted_at).toLocaleDateString() : "Draft"}</strong>
-                <span style={{ marginLeft: 8, color: "var(--kaaya-text-muted)" }}>{c.status.replace(/_/g, " ")}</span>
+          {record.consultations.length === 0 ? (
+            <p className="st-empty">No consultation forms yet.</p>
+          ) : (
+            record.consultations.map((f) => (
+              <Link key={f.id} to={`/staff/consultations/${f.id}`} className="st-row-btn">
+                <b>{f.submitted_at ? new Date(f.submitted_at).toLocaleDateString("en-GB") : "Draft"}</b>
+                <span className="st-muted">{f.status.replace(/_/g, " ")}</span>
               </Link>
-            ))}
-          </div>
-        </>
+            ))
+          )}
+        </div>
       )}
     </div>
   );
