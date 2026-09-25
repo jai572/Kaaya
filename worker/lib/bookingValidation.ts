@@ -281,3 +281,10 @@ export const dailySalesQuerySchema = z.object({
   location_id: z.string().uuid({ message: "Choose a location" }),
   date: dateOnlySchema,
 });
+
+export const trialFeedbackSchema = z.object({
+  kind: z.enum(["problem", "confusing", "idea", "good"]),
+  message: z.string().trim().min(3, "Write a few words").max(4000),
+  tester_name: z.string().trim().max(80).nullable().optional(),
+  page_path: z.string().trim().max(300).nullable().optional(),
+});

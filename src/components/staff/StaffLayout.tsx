@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
 import "../../styles/staff.css";
+import FeedbackDrawer from "./FeedbackDrawer";
 
 const DAILY_LINKS = [
   { to: "/staff/calendar", label: "Calendar" },
@@ -22,6 +23,7 @@ export default function StaffLayout() {
   const navigate = useNavigate();
   const [email, setEmail] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -67,6 +69,9 @@ export default function StaffLayout() {
           ))}
         </nav>
         <div className="st-side-foot">
+          <button type="button" className="st-btn st-btn--ghost st-btn--sm st-feedback-btn" onClick={() => setFeedbackOpen(true)}>
+            Give feedback
+          </button>
           {email && <span title={email}>{email}</span>}
           <button type="button" className="st-link" onClick={signOut}>
             Sign out
@@ -76,6 +81,7 @@ export default function StaffLayout() {
       <main className="st-main">
         <Outlet />
       </main>
+      {feedbackOpen && <FeedbackDrawer onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }

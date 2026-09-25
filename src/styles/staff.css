@@ -1270,6 +1270,18 @@
   margin: 0;
 }
 
+/* trial feedback */
+.st-textarea {
+  min-height: 120px;
+  padding: 8px 10px;
+  resize: vertical;
+  line-height: 1.45;
+}
+.st-feedback-btn {
+  align-self: flex-start;
+  margin-bottom: 4px;
+}
+
 /* old staff pages rendered inside the shell keep their own layout */
 .st-main > .kaaya-shell {
   margin-left: 0;

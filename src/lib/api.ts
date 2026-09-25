@@ -864,3 +864,10 @@ export async function staffVoidSale(id: string, reason: string) {
     reopened_appointments: number;
   }>;
 }
+
+export type FeedbackKind = "problem" | "confusing" | "idea" | "good";
+
+export async function staffSendFeedback(input: { kind: FeedbackKind; message: string; tester_name?: string | null; page_path?: string | null }) {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/feedback", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{ saved: true }>;
+}
