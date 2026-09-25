@@ -493,7 +493,8 @@ export type FeatureKey =
   | "view_all_bookings"
   | "manage_all_bookings"
   | "view_revenue"
-  | "manage_locations";
+  | "manage_locations"
+  | "adjust_sales";
 
 export async function staffListPermissions() {
   const headers = await staffAuthHeader();
@@ -708,6 +709,7 @@ export interface CalendarData {
   dates: string[];
   own_staff_member_id: string | null;
   can_view_all: boolean;
+  can_adjust_sales: boolean;
   staff: { id: string; display_name: string; colour: string | null; active: boolean }[];
   shifts: Record<string, Record<string, CalendarShift | null>>;
   appointments: CalendarAppointment[];
@@ -804,4 +806,61 @@ export async function staffCheckout(input: {
 }) {
   const headers = await staffAuthHeader();
   return request("/api/staff/checkout", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{ sale_id: string; total_amount: number }>;
+}
+
+export interface DailySale {
+  id: string;
+  created_at: string;
+  client_id: string | null;
+  subtotal_amount: number;
+  discount_amount: number;
+  total_amount: number;
+  payment_method: PaymentMethod;
+  payment_note: string | null;
+  price_adjusted: boolean;
+  completed_by: string | null;
+  voided_at: string | null;
+  voided_by: string | null;
+  void_reason: string | null;
+  clients: { first_name: string; last_name: string } | null;
+  sale_items: {
+    id: string;
+    description: string;
+    staff_member_id: string | null;
+    quantity: number;
+    unit_price_amount: number;
+    list_price_amount: number | null;
+    line_total_amount: number;
+  }[];
+}
+
+export interface DailySalesData {
+  date: string;
+  can_void: boolean;
+  summary: {
+    count: number;
+    total: number;
+    by_method: Record<PaymentMethod, number>;
+    discounts: number;
+    adjusted_count: number;
+    voided: { count: number; amount: number };
+    by_staff: { staff_member_id: string | null; amount: number; items: number }[];
+  };
+  sales: DailySale[];
+  staff: { id: string; display_name: string; colour: string | null }[];
+  profiles: { id: string; full_name: string }[];
+}
+
+export async function staffGetDailySales(locationId: string, date: string) {
+  const headers = await staffAuthHeader();
+  const params = new URLSearchParams({ location_id: locationId, date });
+  return request(`/api/staff/sales?${params.toString()}`, { headers }) as Promise<DailySalesData>;
+}
+
+export async function staffVoidSale(id: string, reason: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/sales/${id}/void`, { method: "POST", headers, body: JSON.stringify({ reason }) }) as Promise<{
+    voided: true;
+    reopened_appointments: number;
+  }>;
 }

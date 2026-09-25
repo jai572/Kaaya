@@ -48,8 +48,11 @@ export async function getCalendar(request: Request, env: Env, url: URL): Promise
     if (dates.length > MAX_RANGE_DAYS) return errorResponse(`Pick at most ${MAX_RANGE_DAYS} days`);
 
     const admin = adminClient(env);
-    const canViewAll = await hasCapability(env, staff, "view_all_bookings", ["admin", "owner"]);
-    const ownId = await ownStaffMemberId(env, staff.id);
+    const [canViewAll, canAdjustSales, ownId] = await Promise.all([
+      hasCapability(env, staff, "view_all_bookings", ["admin", "owner"]),
+      hasCapability(env, staff, "adjust_sales", ["admin", "owner"]),
+      ownStaffMemberId(env, staff.id),
+    ]);
 
     // Dates are London-local, timestamps UTC: widen a day each side, then
     // keep only rows whose London date falls in the range.
@@ -125,6 +128,7 @@ export async function getCalendar(request: Request, env: Env, url: URL): Promise
       dates,
       own_staff_member_id: ownId,
       can_view_all: canViewAll,
+      can_adjust_sales: canAdjustSales,
       staff: staffMembers,
       shifts,
       appointments: appointments.map((a) => ({

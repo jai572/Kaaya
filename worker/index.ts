@@ -64,6 +64,7 @@ import {
   staffUpdateClient,
 } from "./routes/staffCalendar";
 import { checkout } from "./routes/checkout";
+import { getDailySales, voidSale } from "./routes/sales";
 import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -225,6 +226,9 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   }
 
   if (path === "/api/staff/checkout" && method === "POST") return checkout(request, env);
+  if (path === "/api/staff/sales" && method === "GET") return getDailySales(request, env, url);
+  const voidSaleMatch = path.match(/^\/api\/staff\/sales\/([^/]+)\/void$/);
+  if (voidSaleMatch && method === "POST") return voidSale(request, env, voidSaleMatch[1]);
   if (path === "/api/staff/calendar" && method === "GET") return getCalendar(request, env, url);
   if (path === "/api/staff/calendar/appointments" && method === "POST") return staffCreateAppointments(request, env);
   if (path === "/api/staff/calendar/blocks" && method === "POST") return createTimeBlock(request, env);

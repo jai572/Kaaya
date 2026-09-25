@@ -1207,6 +1207,69 @@
   gap: 8px;
 }
 
+/* daily sales */
+.st-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.st-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  background: var(--kaaya-surface);
+  border: 1px solid var(--kaaya-border);
+  border-radius: 12px;
+}
+.st-tile span {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--kaaya-text-muted);
+}
+.st-tile b {
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.st-tile small {
+  color: var(--kaaya-text-muted);
+  font-size: 0.78rem;
+}
+.st-tile--main {
+  background: var(--kaaya-accent);
+  border-color: var(--kaaya-accent);
+  color: #fff;
+}
+.st-tile--main span,
+.st-tile--main small {
+  color: rgba(255, 255, 255, 0.82);
+}
+.st-tile--card {
+  border-color: var(--kaaya-accent);
+  box-shadow: inset 0 0 0 1px var(--kaaya-accent);
+}
+.st-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.st-chip--inline {
+  margin-left: 6px;
+}
+.st-table tr.st-voided td {
+  color: var(--kaaya-text-muted);
+  text-decoration: line-through;
+}
+.st-table tr.st-voided td .st-chip {
+  text-decoration: none;
+}
+.st-card-foot {
+  padding: 8px 14px 12px;
+  margin: 0;
+}
+
 /* old staff pages rendered inside the shell keep their own layout */
 .st-main > .kaaya-shell {
   margin-left: 0;

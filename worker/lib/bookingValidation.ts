@@ -182,6 +182,7 @@ export const setStaffPermissionsSchema = z.object({
         "manage_all_bookings",
         "view_revenue",
         "manage_locations",
+        "adjust_sales",
       ]),
       granted: z.boolean().nullable(), // null = clear the override, back to role default
     })
@@ -271,3 +272,12 @@ export const checkoutSchema = z
   .refine((c) => c.items.every((i) => !i.appointment_id || c.appointment_ids.includes(i.appointment_id)), {
     message: "Item belongs to an appointment that isn't being checked out",
   });
+
+export const voidSaleSchema = z.object({
+  reason: z.string().trim().min(3, "Give a reason for voiding").max(300),
+});
+
+export const dailySalesQuerySchema = z.object({
+  location_id: z.string().uuid({ message: "Choose a location" }),
+  date: dateOnlySchema,
+});

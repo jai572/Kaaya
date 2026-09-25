@@ -277,8 +277,8 @@ export default function StaffBookings() {
 
         {revenue && (
           <p>
-            <strong>Today's total:</strong> {formatMoney(revenue.total_amount, revenue.currency)} across{" "}
-            {revenue.appointment_count} booking{revenue.appointment_count === 1 ? "" : "s"}
+            Booked value: {formatMoney(revenue.total_amount, revenue.currency)} across {revenue.appointment_count} booking
+            {revenue.appointment_count === 1 ? "" : "s"}. Money actually taken is on <Link to="/staff/sales">Daily sales</Link>.
           </p>
         )}
       </div>

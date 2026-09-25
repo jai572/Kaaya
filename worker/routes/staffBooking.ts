@@ -36,6 +36,7 @@ const FEATURE_KEYS: FeatureKey[] = [
   "manage_all_bookings",
   "view_revenue",
   "manage_locations",
+  "adjust_sales",
 ];
 
 export async function withStaff<T>(request: Request, env: Env, fn: (staff: Awaited<ReturnType<typeof requireStaff>>) => Promise<T>) {

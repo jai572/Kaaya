@@ -15,6 +15,7 @@ export const KNOWN_EXACT_ROUTES = [
   "/staff/services",
   "/staff/staff-members",
   "/staff/calendar",
+  "/staff/sales",
   "/staff/bookings",
   "/staff/permissions",
   "/staff/rota",

@@ -23,6 +23,7 @@ const StaffRota = lazy(() => import("./pages/staff/StaffRota"));
 const StaffLocations = lazy(() => import("./pages/staff/StaffLocations"));
 const StaffBookings = lazy(() => import("./pages/staff/StaffBookings"));
 const StaffCalendar = lazy(() => import("./pages/staff/calendar/StaffCalendar"));
+const StaffSales = lazy(() => import("./pages/staff/StaffSales"));
 const StaffPermissions = lazy(() => import("./pages/staff/StaffPermissions"));
 const StaffClientRecord = lazy(() => import("./pages/staff/StaffClientRecord"));
 const BookingForm = lazy(() => import("./pages/booking/BookingForm"));
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="rota" element={<StaffRota />} />
           <Route path="locations" element={<StaffLocations />} />
           <Route path="calendar" element={<StaffCalendar />} />
+          <Route path="sales" element={<StaffSales />} />
           <Route path="bookings" element={<StaffBookings />} />
           <Route path="permissions" element={<StaffPermissions />} />
           <Route path="clients/:clientId" element={<StaffClientRecord />} />

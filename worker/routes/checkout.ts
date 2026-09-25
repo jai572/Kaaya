@@ -7,6 +7,7 @@ import { saleTotals } from "../lib/sales";
 import { checkoutSchema } from "../lib/bookingValidation";
 import { withStaff } from "./staffBooking";
 import { canActFor } from "./staffCalendar";
+import { hasCapability } from "../lib/auth";
 
 /** Takes payment and closes out a visit: every appointment passed in is
  * marked completed and linked to one sale. With no appointments it's a
@@ -54,10 +55,19 @@ export async function checkout(request: Request, env: Env): Promise<Response> {
     }
 
     const serviceIds = [...new Set(input.items.map((i) => i.service_id).filter(Boolean))] as string[];
+    const listPrice = new Map<string, number>();
     if (serviceIds.length) {
-      const { data: svc, error } = await admin.from("services").select("id").in("id", serviceIds);
+      const { data: svc, error } = await admin.from("services").select("id, price_amount").in("id", serviceIds);
       if (error) return errorResponse(error.message, 500);
       if ((svc ?? []).length !== serviceIds.length) return errorResponse("One of the treatments no longer exists", 400);
+      for (const x of svc ?? []) listPrice.set(x.id, x.price_amount);
+    }
+
+    // Changing a price or giving a discount is a manager/owner decision.
+    const priceChanged = input.items.some((i) => !i.service_id || i.unit_price_amount !== listPrice.get(i.service_id));
+    const adjusted = priceChanged || input.discount_amount > 0;
+    if (adjusted && !(await hasCapability(env, staff, "adjust_sales", ["admin", "owner"]))) {
+      return errorResponse("Only a manager or owner can change prices or give discounts", 403);
     }
 
     const totals = saleTotals(input.items, input.discount_amount);
@@ -74,6 +84,7 @@ export async function checkout(request: Request, env: Env): Promise<Response> {
         total_amount: totals.total,
         payment_method: input.payment_method,
         payment_note: input.payment_note,
+        price_adjusted: adjusted,
         completed_by: staff.id,
       })
       .select("id")
@@ -96,6 +107,7 @@ export async function checkout(request: Request, env: Env): Promise<Response> {
         description: i.description,
         quantity: i.quantity,
         unit_price_amount: i.unit_price_amount,
+        list_price_amount: i.service_id ? listPrice.get(i.service_id) ?? null : null,
         line_total_amount: i.quantity * i.unit_price_amount,
       }))
     );

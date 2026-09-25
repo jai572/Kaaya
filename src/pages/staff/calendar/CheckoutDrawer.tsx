@@ -44,6 +44,7 @@ export default function CheckoutDrawer({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const canAdjust = data.can_adjust_sales;
   const staffName = useMemo(() => new Map(data.staff.map((s) => [s.id, s.display_name])), [data.staff]);
   const activeStaff = data.staff.filter((s) => s.active && (data.can_view_all || s.id === data.own_staff_member_id));
 
@@ -188,6 +189,8 @@ export default function CheckoutDrawer({
                   className="st-input"
                   inputMode="decimal"
                   aria-label={`Price for ${l.description}`}
+                  readOnly={!canAdjust}
+                  title={canAdjust ? undefined : "Only a manager or owner can change prices"}
                   value={l.price}
                   aria-invalid={prices[i] === null}
                   onChange={(e) => setLines(lines.map((x) => (x.key === l.key ? { ...x, price: e.target.value } : x)))}
@@ -234,12 +237,16 @@ export default function CheckoutDrawer({
         )}
       </div>
 
-      <div className="st-grid-2">
-        <div className="st-field">
-          <label htmlFor="co-discount">Discount (£)</label>
-          <input id="co-discount" className="st-input" inputMode="decimal" placeholder="0.00" value={discount} onChange={(e) => setDiscount(e.target.value)} />
+      {canAdjust ? (
+        <div className="st-grid-2">
+          <div className="st-field">
+            <label htmlFor="co-discount">Discount (£)</label>
+            <input id="co-discount" className="st-input" inputMode="decimal" placeholder="0.00" value={discount} onChange={(e) => setDiscount(e.target.value)} />
+          </div>
         </div>
-      </div>
+      ) : (
+        <span className="st-hint">Prices come from the treatment list. A manager or owner can change a price or give a discount.</span>
+      )}
 
       <div className="st-field">
         <span className="st-label">Paid by</span>

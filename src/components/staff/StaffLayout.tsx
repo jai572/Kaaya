@@ -5,6 +5,7 @@ import "../../styles/staff.css";
 
 const DAILY_LINKS = [
   { to: "/staff/calendar", label: "Calendar" },
+  { to: "/staff/sales", label: "Daily sales" },
   { to: "/staff/bookings", label: "Approvals & requests" },
   { to: "/staff", label: "Consultations", end: true },
 ];

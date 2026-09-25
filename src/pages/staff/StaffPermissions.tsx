@@ -11,6 +11,7 @@ const FEATURE_LABELS: Record<FeatureKey, string> = {
   manage_all_bookings: "Cancel any booking",
   view_revenue: "View revenue totals",
   manage_locations: "Manage locations, opening hours and online booking settings",
+  adjust_sales: "Change prices, give discounts and void sales at checkout",
 };
 
 type OverrideState = "default" | "allow" | "deny";
