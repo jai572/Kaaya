@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   staffCreateCalendarAppointments,
   staffCreateClient,
@@ -28,6 +28,17 @@ interface Part {
   serviceIds: string[];
 }
 
+export interface ClientDraft {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+}
+
+export function draftIsComplete(d: ClientDraft | null): d is ClientDraft {
+  return !!d && d.first_name.trim().length > 0 && d.phone.trim().length >= 5;
+}
+
 let partKey = 0;
 
 export default function NewAppointmentDrawer({
@@ -50,9 +61,16 @@ export default function NewAppointmentDrawer({
   const [parts, setParts] = useState<Part[]>([
     { key: ++partKey, staffId: prefill.staffId ?? activeStaff[0]?.id ?? "", date: prefill.date, time: prefill.time, serviceIds: [] },
   ]);
+  const [draft, setDraft] = useState<ClientDraft | null>(null);
   const [warnings, setWarnings] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  // A message about the booking is useless if it renders below the fold.
+  useEffect(() => {
+    if (error || warnings) messagesRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [error, warnings]);
 
   const serviceById = useMemo(() => new Map(services.map((s) => [s.id, s])), [services]);
   const partMinutes = (p: Part) => p.serviceIds.reduce((n, id) => n + (serviceById.get(id)?.duration_minutes ?? 0), 0);
@@ -71,15 +89,42 @@ export default function NewAppointmentDrawer({
   }
 
   const total = parts.reduce((n, p) => n + p.serviceIds.reduce((m, id) => m + (serviceById.get(id)?.price_amount ?? 0), 0), 0);
-  const ready = !!client && parts.every((p) => p.staffId && p.date && p.time && p.serviceIds.length > 0);
+  function missing(): string[] {
+    const out: string[] = [];
+    if (!client) {
+      if (!draft) out.push("choose a client, or add a new one");
+      else if (!draft.first_name.trim()) out.push("enter the new client's first name");
+      else if (draft.phone.trim().length < 5) out.push("enter the new client's phone number");
+    }
+    parts.forEach((p, i) => {
+      const label = parts.length > 1 ? ` (treatment ${i + 1})` : "";
+      if (!p.staffId) out.push(`choose who it's with${label}`);
+      if (!p.date || !p.time) out.push(`set a date and start time${label}`);
+      if (p.serviceIds.length === 0) out.push(`pick at least one treatment${label}`);
+    });
+    return out;
+  }
 
   async function book(confirm: boolean) {
-    if (!client) return;
+    const gaps = missing();
+    if (gaps.length) {
+      setError(`To book, ${gaps.join(", ")}.`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
+      // A new client typed in but not yet added is created as part of booking.
+      let bookingClient = client;
+      if (!bookingClient && draftIsComplete(draft)) {
+        const created = await staffCreateClient({ ...draft, email: draft.email.trim() || null });
+        bookingClient = created.client;
+        setClient(created.client);
+        setDraft(null);
+      }
+      if (!bookingClient) return;
       const res = await staffCreateCalendarAppointments({
-        client_id: client.id,
+        client_id: bookingClient.id,
         location_id: data.location.id,
         link_appointment_id: prefill.linkAppointmentId ?? null,
         confirm_warnings: confirm,
@@ -107,13 +152,13 @@ export default function NewAppointmentDrawer({
           <button type="button" className="st-btn st-btn--ghost" onClick={onClose} disabled={busy}>
             Close
           </button>
-          <button type="button" className="st-btn" disabled={!ready || busy} onClick={() => book(!!warnings)}>
+          <button type="button" className="st-btn" disabled={busy} onClick={() => book(!!warnings)}>
             {busy ? "Booking…" : warnings ? "Book anyway" : "Book"}
           </button>
         </>
       }
     >
-      <ClientPicker client={client} onChange={setClient} locked={!!prefill.linkAppointmentId} />
+      <ClientPicker client={client} onChange={setClient} onDraftChange={setDraft} locked={!!prefill.linkAppointmentId} />
 
       {parts.map((p, i) => (
         <PartEditor
@@ -136,6 +181,7 @@ export default function NewAppointmentDrawer({
         </button>
       )}
 
+      <div ref={messagesRef} className="st-drawer-messages">
       {warnings && (
         <div className="st-note st-note--warn" role="alert">
           <b>Please check before booking:</b>
@@ -147,18 +193,38 @@ export default function NewAppointmentDrawer({
           Staff can still book it — press “Book anyway”.
         </div>
       )}
-      {error && <p className="st-error">{error}</p>}
+      {error && (
+        <p className="st-error" role="alert">
+          {error}
+        </p>
+      )}
+      </div>
     </Drawer>
   );
 }
 
-export function ClientPicker({ client, onChange, locked }: { client: ClientSummary | null; onChange: (c: ClientSummary | null) => void; locked: boolean }) {
+export function ClientPicker({
+  client,
+  onChange,
+  onDraftChange,
+  locked,
+}: {
+  client: ClientSummary | null;
+  onChange: (c: ClientSummary | null) => void;
+  /** The new-client form as typed (null when not adding), so the parent can create the client on submit. */
+  onDraftChange?: (d: ClientDraft | null) => void;
+  locked: boolean;
+}) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<ClientSummary[]>([]);
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "" });
+  const [form, setForm] = useState<ClientDraft>({ first_name: "", last_name: "", phone: "", email: "" });
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onDraftChange?.(adding && !client ? form : null);
+  }, [adding, client, form, onDraftChange]);
 
   useEffect(() => {
     if (client || q.trim().length < 2) {
