@@ -20,7 +20,7 @@ const AXIS_PX = 56;
 const MIN_COLUMN_PX = 80;
 const ZOOM_STEP = 1.25;
 
-type Anchor = { viewX: number; viewY: number; scrollLeft: number; scrollTop: number; gridWidth: number; zoom: number };
+type Anchor = { viewX: number; viewY: number; scrollLeft: number; scrollTop: number; gridWidth: number; zoom: number; snap: boolean };
 
 export interface GridColumn {
   key: string;
@@ -67,11 +67,22 @@ export default function TimeGrid({
   onEmptyClick: (column: GridColumn, minutes: number) => void;
 }) {
   const now = useNowMinutes();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [viewWidth, setViewWidth] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setViewWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const PX_PER_MIN = BASE_PX_PER_MIN * zoom;
-  const columnPx = Math.max(MIN_COLUMN_PX, Math.round(minColumnWidth * zoom));
+  // Columns grow with zoom but never wider than the screen: past that, zoom only adds height.
+  const fitWidth = viewWidth > 0 ? Math.max(MIN_COLUMN_PX, viewWidth - AXIS_PX - 2) : Infinity;
+  const columnPx = Math.max(MIN_COLUMN_PX, Math.min(Math.round(minColumnWidth * zoom), fitWidth));
   const height = (win.end - win.start) * PX_PER_MIN;
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
@@ -79,8 +90,19 @@ export default function TimeGrid({
 
   /** Change zoom keeping the content under (clientX, clientY) -- or the
    * middle of the calendar -- where it is on screen. */
+  /** Line the view up with the nearest column so names aren't left cut off. */
+  const snapToColumn = useCallback(() => {
+    const el = scrollRef.current;
+    const grid = gridRef.current;
+    if (!el || !grid || grid.offsetWidth <= el.clientWidth + 1) return;
+    const starts = [...grid.querySelectorAll<HTMLElement>(".st-cal-colhead")].map((h) => h.offsetLeft - AXIS_PX);
+    if (!starts.length) return;
+    const nearest = starts.reduce((best, x) => (Math.abs(x - el.scrollLeft) < Math.abs(best - el.scrollLeft) ? x : best), starts[0]);
+    if (Math.abs(nearest - el.scrollLeft) > 1) el.scrollTo({ left: Math.max(0, nearest), behavior: "smooth" });
+  }, []);
+
   const zoomTo = useCallback(
-    (target: number, clientX?: number, clientY?: number) => {
+    (target: number, clientX?: number, clientY?: number, snap = false) => {
       const el = scrollRef.current;
       const grid = gridRef.current;
       const next = clampZoom(target);
@@ -94,6 +116,7 @@ export default function TimeGrid({
           scrollTop: el.scrollTop,
           gridWidth: grid.offsetWidth,
           zoom: zoomRef.current,
+          snap,
         };
       }
       onZoomChange(next);
@@ -112,7 +135,8 @@ export default function TimeGrid({
     const widthRatio = (grid.offsetWidth - AXIS_PX) / Math.max(1, a.gridWidth - AXIS_PX);
     el.scrollTop = anchoredScroll({ scroll: a.scrollTop, view: a.viewY, lead: head, ratio: zoom / a.zoom });
     el.scrollLeft = anchoredScroll({ scroll: a.scrollLeft, view: a.viewX, lead: AXIS_PX, ratio: widthRatio });
-  }, [zoom]);
+    if (a.snap) snapToColumn();
+  }, [zoom, snapToColumn]);
 
   // Two-finger pinch (phones, tablets) and trackpad pinch (ctrl + wheel) zoom
   // the calendar itself instead of the whole page.
@@ -136,7 +160,10 @@ export default function TimeGrid({
       frame = requestAnimationFrame(() => zoomTo(target, midX, midY));
     };
     const onTouchEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) pinch = null;
+      if (pinch && e.touches.length < 2) {
+        pinch = null;
+        window.setTimeout(snapToColumn, 50);
+      }
     };
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return; // plain wheel / two-finger swipe scrolls as normal
@@ -161,7 +188,7 @@ export default function TimeGrid({
       el.removeEventListener("gesturestart", stopSafariPageZoom);
       el.removeEventListener("gesturechange", stopSafariPageZoom);
     };
-  }, [zoomTo]);
+  }, [zoomTo, snapToColumn]);
   const hours: number[] = [];
   for (let m = win.start; m < win.end; m += 60) hours.push(m);
 
@@ -302,13 +329,13 @@ export default function TimeGrid({
       </div>
     </div>
       <div className="st-cal-zoom" role="group" aria-label="Calendar zoom">
-        <button type="button" aria-label="Zoom out" onClick={() => zoomTo(zoom / ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}>
+        <button type="button" aria-label="Zoom out" onClick={() => zoomTo(zoom / ZOOM_STEP, undefined, undefined, true)} disabled={zoom <= ZOOM_MIN}>
           −
         </button>
-        <button type="button" aria-label="Reset zoom" title="Reset zoom" onClick={() => zoomTo(1)}>
+        <button type="button" aria-label="Reset zoom" title="Reset zoom" onClick={() => zoomTo(1, undefined, undefined, true)}>
           {Math.round(zoom * 100)}%
         </button>
-        <button type="button" aria-label="Zoom in" onClick={() => zoomTo(zoom * ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}>
+        <button type="button" aria-label="Zoom in" onClick={() => zoomTo(zoom * ZOOM_STEP, undefined, undefined, true)} disabled={zoom >= ZOOM_MAX}>
           +
         </button>
       </div>
