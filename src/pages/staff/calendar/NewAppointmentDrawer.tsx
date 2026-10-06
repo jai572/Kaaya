@@ -67,6 +67,11 @@ export default function NewAppointmentDrawer({
   const [error, setError] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
+  // Any change to the booking makes an earlier "what's missing" or failure message stale.
+  useEffect(() => {
+    setError(null);
+  }, [client, draft, parts]);
+
   // A message about the booking is useless if it renders below the fold.
   useEffect(() => {
     if (error || warnings) messagesRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
