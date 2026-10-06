@@ -41,7 +41,7 @@ computation, `worker/routes/booking.ts`/`staffBooking.ts` for the API, and
 
 ## Infra status
 
-- **Supabase project**: `yfsoxbcqmyzddqtqiuzj` (org "Kaaya Management System", eu-west-1).
+- **Supabase project**: `yfsoxbcqmyzddqtqiuzj` (eu-west-1), owned by the Supabase account **jb@kaaya-clinic.com**. Connect the Supabase connector with that login; other logins have empty "Kaaya Management System" orgs that do not contain it.
   Schema + RLS applied via migrations (run through the Supabase MCP tools, not
   files in this repo — see `mcp__Supabase__list_migrations` for history).
 - **Cloudflare**: Worker `kaaya` serves both the built React app (static
