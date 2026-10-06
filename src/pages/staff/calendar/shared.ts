@@ -51,6 +51,7 @@ export interface CalendarPrefs {
   showConfirmed: boolean;
   showPending: boolean;
   showCancelled: boolean;
+  zoom: number;
 }
 
 const PREFS_KEY = "kaaya.staff.calendar.v1";
@@ -64,6 +65,7 @@ export function loadPrefs(): CalendarPrefs {
     showConfirmed: true,
     showPending: true,
     showCancelled: false,
+    zoom: 1,
   };
   try {
     const raw = window.localStorage.getItem(PREFS_KEY);

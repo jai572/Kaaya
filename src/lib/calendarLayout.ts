@@ -133,3 +133,22 @@ export function durationLabel(minutes: number): string {
   const m = minutes % 60;
   return m ? `${h} h ${m} min` : `${h} h`;
 }
+
+/** Calendar zoom: 1 = 96px an hour. Pinch and the +/- buttons stay in this range. */
+export const ZOOM_MIN = 0.6;
+export const ZOOM_MAX = 3.5;
+
+export function clampZoom(z: number): number {
+  if (!Number.isFinite(z)) return 1;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+}
+
+/** New scroll offset that keeps the same content point under a fixed point
+ * of the viewport (the fingers, or the middle of the screen) after the
+ * scalable part of the content grows or shrinks by `ratio`. `lead` is the
+ * fixed-size part before it (column headers, the time axis). */
+export function anchoredScroll(p: { scroll: number; view: number; lead: number; ratio: number }): number {
+  const content = p.scroll + p.view;
+  const scaled = content <= p.lead ? content : p.lead + (content - p.lead) * p.ratio;
+  return Math.max(0, Math.round(scaled - p.view));
+}

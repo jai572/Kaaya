@@ -1,10 +1,26 @@
-import { useEffect, useState, type CSSProperties, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import type { CalendarAppointment, CalendarBlock, CalendarShift } from "../../../lib/api";
-import { clockTime, durationLabel, hourLabel, layoutLanes, londonDayMinutes, timeToMinutes } from "../../../lib/calendarLayout";
+import {
+  anchoredScroll,
+  clampZoom,
+  clockTime,
+  durationLabel,
+  hourLabel,
+  layoutLanes,
+  londonDayMinutes,
+  timeToMinutes,
+  ZOOM_MAX,
+  ZOOM_MIN,
+} from "../../../lib/calendarLayout";
 import { apptTitle, BLOCK_LABEL, staffColour } from "./shared";
 
-export const PX_PER_MIN = 1.6; // 96px an hour; a 5-minute threading slot is 8px
+const BASE_PX_PER_MIN = 1.6; // zoom 1: 96px an hour; a 5-minute threading slot is 8px
 const MIN_BLOCK_PX = 24;
+const AXIS_PX = 56;
+const MIN_COLUMN_PX = 80;
+const ZOOM_STEP = 1.25;
+
+type Anchor = { viewX: number; viewY: number; scrollLeft: number; scrollTop: number; gridWidth: number; zoom: number };
 
 export interface GridColumn {
   key: string;
@@ -36,8 +52,13 @@ export default function TimeGrid({
   onOpenBlock,
   onEmptyClick,
   minColumnWidth = 148,
+  zoom,
+  onZoomChange,
 }: {
   minColumnWidth?: number;
+  /** 1 = 96px an hour. Scales hour height and column width together. */
+  zoom: number;
+  onZoomChange: (zoom: number) => void;
   columns: GridColumn[];
   window: { start: number; end: number };
   colourFor: (staffId: string) => string;
@@ -46,7 +67,101 @@ export default function TimeGrid({
   onEmptyClick: (column: GridColumn, minutes: number) => void;
 }) {
   const now = useNowMinutes();
+  const PX_PER_MIN = BASE_PX_PER_MIN * zoom;
+  const columnPx = Math.max(MIN_COLUMN_PX, Math.round(minColumnWidth * zoom));
   const height = (win.end - win.start) * PX_PER_MIN;
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const anchorRef = useRef<Anchor | null>(null);
+
+  /** Change zoom keeping the content under (clientX, clientY) -- or the
+   * middle of the calendar -- where it is on screen. */
+  const zoomTo = useCallback(
+    (target: number, clientX?: number, clientY?: number) => {
+      const el = scrollRef.current;
+      const grid = gridRef.current;
+      const next = clampZoom(target);
+      if (!el || !grid || Math.abs(next - zoomRef.current) < 0.005) return;
+      const rect = el.getBoundingClientRect();
+      if (!anchorRef.current) {
+        anchorRef.current = {
+          viewX: clientX === undefined ? el.clientWidth / 2 : clientX - rect.left,
+          viewY: clientY === undefined ? el.clientHeight / 2 : clientY - rect.top,
+          scrollLeft: el.scrollLeft,
+          scrollTop: el.scrollTop,
+          gridWidth: grid.offsetWidth,
+          zoom: zoomRef.current,
+        };
+      }
+      onZoomChange(next);
+    },
+    [onZoomChange]
+  );
+
+  // After the grid re-renders at the new scale, scroll so the anchor point stays put.
+  useLayoutEffect(() => {
+    const a = anchorRef.current;
+    const el = scrollRef.current;
+    const grid = gridRef.current;
+    if (!a || !el || !grid) return;
+    anchorRef.current = null;
+    const head = (grid.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0;
+    const widthRatio = (grid.offsetWidth - AXIS_PX) / Math.max(1, a.gridWidth - AXIS_PX);
+    el.scrollTop = anchoredScroll({ scroll: a.scrollTop, view: a.viewY, lead: head, ratio: zoom / a.zoom });
+    el.scrollLeft = anchoredScroll({ scroll: a.scrollLeft, view: a.viewX, lead: AXIS_PX, ratio: widthRatio });
+  }, [zoom]);
+
+  // Two-finger pinch (phones, tablets) and trackpad pinch (ctrl + wheel) zoom
+  // the calendar itself instead of the whole page.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let pinch: { dist: number; zoom: number } | null = null;
+    let frame = 0;
+    const distance = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinch = { dist: distance(e.touches) || 1, zoom: zoomRef.current };
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      const t = e.touches;
+      const target = pinch.zoom * (distance(t) / pinch.dist);
+      const midX = (t[0].clientX + t[1].clientX) / 2;
+      const midY = (t[0].clientY + t[1].clientY) / 2;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => zoomTo(target, midX, midY));
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null;
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return; // plain wheel / two-finger swipe scrolls as normal
+      e.preventDefault();
+      zoomTo(zoomRef.current * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+    };
+    const stopSafariPageZoom = (e: Event) => e.preventDefault();
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("gesturestart", stopSafariPageZoom);
+    el.addEventListener("gesturechange", stopSafariPageZoom);
+    return () => {
+      cancelAnimationFrame(frame);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", stopSafariPageZoom);
+      el.removeEventListener("gesturechange", stopSafariPageZoom);
+    };
+  }, [zoomTo]);
   const hours: number[] = [];
   for (let m = win.start; m < win.end; m += 60) hours.push(m);
 
@@ -57,8 +172,13 @@ export default function TimeGrid({
   }
 
   return (
-    <div className="st-cal-scroll">
-      <div className="st-cal-grid" style={{ gridTemplateColumns: `56px repeat(${columns.length}, minmax(${minColumnWidth}px, 1fr))` }}>
+    <div className="st-cal-frame">
+    <div className="st-cal-scroll" ref={scrollRef}>
+      <div
+        className="st-cal-grid"
+        ref={gridRef}
+        style={{ gridTemplateColumns: `${AXIS_PX}px repeat(${columns.length}, minmax(${columnPx}px, 1fr))`, "--hour": `${60 * PX_PER_MIN}px` } as CSSProperties}
+      >
         <div className="st-cal-corner" />
         {columns.map((col) => (
           <div key={col.key} className={`st-cal-colhead${col.isToday ? " st-cal-colhead--today" : ""}`}>
@@ -179,6 +299,18 @@ export default function TimeGrid({
             </div>
           );
         })}
+      </div>
+    </div>
+      <div className="st-cal-zoom" role="group" aria-label="Calendar zoom">
+        <button type="button" aria-label="Zoom out" onClick={() => zoomTo(zoom / ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}>
+          −
+        </button>
+        <button type="button" aria-label="Reset zoom" title="Reset zoom" onClick={() => zoomTo(1)}>
+          {Math.round(zoom * 100)}%
+        </button>
+        <button type="button" aria-label="Zoom in" onClick={() => zoomTo(zoom * ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}>
+          +
+        </button>
       </div>
     </div>
   );

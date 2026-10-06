@@ -769,7 +769,52 @@
   font-weight: 600;
   min-height: 30px;
 }
+.st-cal-frame {
+  position: relative;
+}
+.st-cal-zoom {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  display: flex;
+  background: var(--kaaya-surface);
+  border: 1px solid var(--kaaya-border);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(5, 30, 48, 0.14);
+  overflow: hidden;
+}
+.st-cal-zoom button {
+  min-width: 44px;
+  min-height: 40px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--kaaya-accent);
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.st-cal-zoom button + button {
+  border-left: 1px solid var(--kaaya-border);
+}
+.st-cal-zoom button:first-child,
+.st-cal-zoom button:last-child {
+  font-size: 1.2rem;
+}
+.st-cal-zoom button:disabled {
+  color: var(--kaaya-text-muted);
+  opacity: 0.5;
+  cursor: default;
+}
+.st-cal-zoom button:focus-visible {
+  outline: 2px solid var(--kaaya-sky);
+  outline-offset: -2px;
+}
 .st-cal-scroll {
+  /* one-finger scrolling stays native; two-finger pinch is handled by the calendar */
+  touch-action: pan-x pan-y;
   overflow: auto;
   max-height: calc(100vh - 140px);
   background: var(--kaaya-surface);
@@ -851,7 +896,7 @@
   pointer-events: none;
   background-image: linear-gradient(to bottom, var(--kaaya-border) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(120, 140, 155, 0.14) 1px, transparent 1px);
-  background-size: 100% 96px, 100% 48px;
+  background-size: 100% var(--hour, 96px), 100% calc(var(--hour, 96px) / 2);
 }
 .st-cal-shift {
   position: absolute;

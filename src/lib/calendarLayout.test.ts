@@ -87,3 +87,23 @@ describe("durationLabel", () => {
     expect(durationLabel(75)).toBe("1 h 15 min");
   });
 });
+
+import { clampZoom, anchoredScroll, ZOOM_MAX, ZOOM_MIN } from "./calendarLayout";
+
+describe("calendar zoom", () => {
+  it("keeps zoom inside the allowed range", () => {
+    expect(clampZoom(10)).toBe(ZOOM_MAX);
+    expect(clampZoom(0.1)).toBe(ZOOM_MIN);
+    expect(clampZoom(1.234)).toBe(1.23);
+    expect(clampZoom(Number.NaN)).toBe(1);
+  });
+  it("keeps the point under the fingers in place when zooming in", () => {
+    // header 60px; point 300px into the view at scroll 400 => content y 700 => 640px into the scaled part
+    const next = anchoredScroll({ scroll: 400, view: 300, lead: 60, ratio: 2 });
+    expect(next).toBe(60 + 640 * 2 - 300);
+  });
+  it("never scrolls above the top when zooming out", () => {
+    expect(anchoredScroll({ scroll: 50, view: 100, lead: 60, ratio: 0.5 })).toBe(5);
+    expect(anchoredScroll({ scroll: 0, view: 40, lead: 60, ratio: 0.5 })).toBe(0);
+  });
+});

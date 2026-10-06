@@ -13,6 +13,7 @@ import {
 } from "../../../lib/api";
 import {
   addDays,
+  clampZoom,
   clockTime,
   dayOfWeek,
   londonDayMinutes,
@@ -71,6 +72,7 @@ export default function StaffCalendar() {
   const setDate = (d: string) => setParams(d === today ? {} : { date: d }, { replace: true });
 
   const [prefs, setPrefs] = useState<CalendarPrefs>(loadPrefs);
+  const [zoom, setZoom] = useState(() => clampZoom(prefs.zoom));
   const updatePrefs = useCallback((patch: Partial<CalendarPrefs>) => {
     setPrefs((p) => {
       const next = { ...p, ...patch };
@@ -78,6 +80,12 @@ export default function StaffCalendar() {
       return next;
     });
   }, []);
+
+  // Save the zoom once a pinch settles, not on every frame of it.
+  useEffect(() => {
+    const t = window.setTimeout(() => updatePrefs({ zoom }), 400);
+    return () => window.clearTimeout(t);
+  }, [zoom, updatePrefs]);
 
   const [locations, setLocations] = useState<LocationRow[] | null>(null);
   const [data, setData] = useState<CalendarData | null>(null);
@@ -302,6 +310,8 @@ export default function StaffCalendar() {
         <TimeGrid
           columns={columns}
           minColumnWidth={prefs.view === "week" ? 104 : 148}
+          zoom={zoom}
+          onZoomChange={setZoom}
           window={gridWindow}
           colourFor={(id) => staffColour(staffById.get(id)?.colour)}
           onOpenAppointment={(a) => setOpen({ kind: "appt", id: a.id })}
