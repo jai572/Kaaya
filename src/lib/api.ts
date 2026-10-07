@@ -496,7 +496,8 @@ export type FeatureKey =
   | "manage_all_bookings"
   | "view_revenue"
   | "manage_locations"
-  | "adjust_sales";
+  | "adjust_sales"
+  | "view_staff_records";
 
 export async function staffListPermissions() {
   const headers = await staffAuthHeader();
@@ -872,4 +873,82 @@ export type FeedbackKind = "problem" | "confusing" | "idea" | "good";
 export async function staffSendFeedback(input: { kind: FeedbackKind; message: string; tester_name?: string | null; page_path?: string | null }) {
   const headers = await staffAuthHeader();
   return request("/api/staff/feedback", { method: "POST", headers, body: JSON.stringify(input) }) as Promise<{ saved: true }>;
+}
+
+// --- Staff files (personnel records; view_staff_records permission) ---
+
+export type RightToWorkType = "british_irish_passport" | "share_code" | "visa_or_permit" | "other";
+export type StaffDocumentKind = "id" | "right_to_work" | "cv" | "qualification" | "other";
+
+export interface StaffRecord {
+  legal_name: string | null;
+  date_of_birth: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  beauty_experience_since: string | null;
+  right_to_work_type: RightToWorkType | null;
+  right_to_work_checked_on: string | null;
+  right_to_work_expires_on: string | null;
+  notes: string | null;
+}
+
+export interface StaffDocument {
+  id: string;
+  kind: StaffDocumentKind;
+  label: string;
+  issued_on: string | null;
+  expires_on: string | null;
+  file_name: string | null;
+  content_type: string | null;
+  size_bytes: number | null;
+  uploaded_at: string;
+}
+
+export async function staffCanViewFiles() {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/files/access", { headers }) as Promise<{ allowed: boolean }>;
+}
+
+export async function staffListFiles() {
+  const headers = await staffAuthHeader();
+  return request("/api/staff/files", { headers }) as Promise<{
+    staff: { id: string; display_name: string; active: boolean; document_count: number; alerts: string[] }[];
+  }>;
+}
+
+export async function staffGetFile(staffMemberId: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/files/${staffMemberId}`, { headers }) as Promise<{
+    member: { id: string; display_name: string; active: boolean };
+    record: StaffRecord | null;
+    documents: StaffDocument[];
+    alerts: string[];
+  }>;
+}
+
+export async function staffSaveFile(staffMemberId: string, record: StaffRecord) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/files/${staffMemberId}`, { method: "PUT", headers, body: JSON.stringify(record) });
+}
+
+export async function staffUploadDocument(staffMemberId: string, form: FormData) {
+  const headers = await staffAuthHeader();
+  // Not request(): it forces a JSON content-type, which would break the multipart boundary.
+  const res = await fetch(`/api/staff/files/${staffMemberId}/documents`, { method: "POST", headers, body: form });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { error?: string }).error ?? `Upload failed (${res.status})`);
+  return body as { id: string };
+}
+
+export async function staffDocumentLink(documentId: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/files/documents/${documentId}/download`, { headers }) as Promise<{ url: string }>;
+}
+
+export async function staffDeleteDocument(documentId: string) {
+  const headers = await staffAuthHeader();
+  return request(`/api/staff/files/documents/${documentId}`, { method: "DELETE", headers });
 }

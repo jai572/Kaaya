@@ -12,6 +12,7 @@ const FEATURE_LABELS: Record<FeatureKey, string> = {
   view_revenue: "View revenue totals",
   manage_locations: "Manage locations, opening hours and online booking settings",
   adjust_sales: "Change prices, give discounts and void sales at checkout",
+  view_staff_records: "See and edit staff files: ID, right to work, address, CVs and qualifications",
 };
 
 type OverrideState = "default" | "allow" | "deny";

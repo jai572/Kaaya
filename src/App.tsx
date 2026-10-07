@@ -19,6 +19,8 @@ const StaffConsultationList = lazy(() => import("./pages/staff/StaffConsultation
 const StaffConsultationDetail = lazy(() => import("./pages/staff/StaffConsultationDetail"));
 const StaffServices = lazy(() => import("./pages/staff/StaffServices"));
 const StaffMembers = lazy(() => import("./pages/staff/StaffMembers"));
+const StaffFiles = lazy(() => import("./pages/staff/StaffFiles"));
+const StaffFileDetail = lazy(() => import("./pages/staff/StaffFileDetail"));
 const StaffRota = lazy(() => import("./pages/staff/StaffRota"));
 const StaffLocations = lazy(() => import("./pages/staff/StaffLocations"));
 const StaffBookings = lazy(() => import("./pages/staff/StaffBookings"));
@@ -60,6 +62,8 @@ export default function App() {
           <Route path="bookings" element={<StaffBookings />} />
           <Route path="permissions" element={<StaffPermissions />} />
           <Route path="clients/:clientId" element={<StaffClientRecord />} />
+          <Route path="files" element={<StaffFiles />} />
+          <Route path="files/:staffMemberId" element={<StaffFileDetail />} />
         </Route>
 
         <Route path="*" element={<NotFound />} />

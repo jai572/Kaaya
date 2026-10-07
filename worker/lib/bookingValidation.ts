@@ -183,6 +183,7 @@ export const setStaffPermissionsSchema = z.object({
         "view_revenue",
         "manage_locations",
         "adjust_sales",
+        "view_staff_records",
       ]),
       granted: z.boolean().nullable(), // null = clear the override, back to role default
     })

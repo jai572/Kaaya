@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
+import { staffCanViewFiles } from "../../lib/api";
 import "../../styles/staff.css";
 import FeedbackDrawer from "./FeedbackDrawer";
 
@@ -24,6 +25,7 @@ export default function StaffLayout() {
   const [email, setEmail] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [canViewFiles, setCanViewFiles] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -33,6 +35,10 @@ export default function StaffLayout() {
       }
       setEmail(data.session.user.email ?? null);
       setReady(true);
+      // Staff files are private: only show the link to people allowed in.
+      staffCanViewFiles()
+        .then((res) => setCanViewFiles(res.allowed))
+        .catch(() => setCanViewFiles(false));
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) navigate("/staff/login", { replace: true });
@@ -67,6 +73,7 @@ export default function StaffLayout() {
               {l.label}
             </NavLink>
           ))}
+          {canViewFiles && <NavLink to="/staff/files">Staff files</NavLink>}
         </nav>
         <div className="st-side-foot">
           <button type="button" className="st-btn st-btn--ghost st-btn--sm st-feedback-btn" onClick={() => setFeedbackOpen(true)}>

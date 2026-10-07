@@ -20,6 +20,7 @@ export const KNOWN_EXACT_ROUTES = [
   "/staff/permissions",
   "/staff/rota",
   "/staff/locations",
+  "/staff/files",
 ] as const;
 
 export const KNOWN_ROUTE_PATTERNS: RegExp[] = [
@@ -27,6 +28,7 @@ export const KNOWN_ROUTE_PATTERNS: RegExp[] = [
   /^\/c\/[^/]+$/,
   /^\/staff\/consultations\/[^/]+$/,
   /^\/staff\/clients\/[^/]+$/,
+  /^\/staff\/files\/[^/]+$/,
   /^\/book\/[^/]+\/confirmed$/,
   /^\/book\/[^/]+\/manage$/,
 ];

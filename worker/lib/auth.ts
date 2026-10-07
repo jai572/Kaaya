@@ -56,7 +56,8 @@ export type FeatureKey =
   | "manage_all_bookings"
   | "view_revenue"
   | "manage_locations"
-  | "adjust_sales";
+  | "adjust_sales"
+  | "view_staff_records";
 
 /** An explicit per-staff override (grant or deny) always wins over the
  * role's default. No override row -> falls back to defaultAllowedRoles. */

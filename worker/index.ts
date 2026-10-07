@@ -66,6 +66,15 @@ import {
 import { checkout } from "./routes/checkout";
 import { getDailySales, voidSale } from "./routes/sales";
 import { submitFeedback } from "./routes/feedback";
+import {
+  canViewStaffRecords,
+  listStaffFiles,
+  getStaffFile,
+  saveStaffFile,
+  uploadStaffDocument,
+  downloadStaffDocument,
+  deleteStaffDocument,
+} from "./routes/staffRecords";
 import { isKnownRoute } from "../shared/routes";
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
@@ -228,6 +237,19 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
 
   if (path === "/api/staff/checkout" && method === "POST") return checkout(request, env);
   if (path === "/api/staff/feedback" && method === "POST") return submitFeedback(request, env);
+  if (path === "/api/staff/files/access" && method === "GET") return canViewStaffRecords(request, env);
+  if (path === "/api/staff/files" && method === "GET") return listStaffFiles(request, env);
+  const staffFileDocMatch = path.match(/^\/api\/staff\/files\/documents\/([^/]+)$/);
+  if (staffFileDocMatch && method === "DELETE") return deleteStaffDocument(request, env, staffFileDocMatch[1]);
+  const staffFileDownloadMatch = path.match(/^\/api\/staff\/files\/documents\/([^/]+)\/download$/);
+  if (staffFileDownloadMatch && method === "GET") return downloadStaffDocument(request, env, staffFileDownloadMatch[1]);
+  const staffFileUploadMatch = path.match(/^\/api\/staff\/files\/([^/]+)\/documents$/);
+  if (staffFileUploadMatch && method === "POST") return uploadStaffDocument(request, env, staffFileUploadMatch[1]);
+  const staffFileMatch = path.match(/^\/api\/staff\/files\/([^/]+)$/);
+  if (staffFileMatch && staffFileMatch[1] !== "access" && staffFileMatch[1] !== "documents") {
+    if (method === "GET") return getStaffFile(request, env, staffFileMatch[1]);
+    if (method === "PUT") return saveStaffFile(request, env, staffFileMatch[1]);
+  }
   if (path === "/api/staff/sales" && method === "GET") return getDailySales(request, env, url);
   const voidSaleMatch = path.match(/^\/api\/staff\/sales\/([^/]+)\/void$/);
   if (voidSaleMatch && method === "POST") return voidSale(request, env, voidSaleMatch[1]);
