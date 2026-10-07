@@ -30,6 +30,7 @@ type Acknowledgement = {
   client_decision: "continue" | "decline";
   flag_ids: string[];
   acknowledged_at: string;
+  declarations: { version: string; statements: { key: string; text: string }[] } | null;
 };
 
 type Detail = {
@@ -43,7 +44,9 @@ type Detail = {
   supersedes_consultation_id: string | null;
   superseded_by_consultation_id: string | null;
   clients: { first_name: string; last_name: string; email: string; phone: string; address: string | null } | null;
-  treatments: { id: string; name: string }[];
+  treatments: { id: string; name: string; services?: string[] }[];
+  guardian_name: string | null;
+  guardian_relationship: string | null;
   answers: Answer[];
   flags: Flag[];
   signature: {
@@ -244,6 +247,12 @@ export default function StaffConsultationDetail() {
             {VALIDITY_LABEL[data.validity_status]}
           </span>
         </p>
+        {data.guardian_name && (
+          <p>
+            <span className="kaaya-badge kaaya-badge--MEDIUM">Under 16</span> Completed and signed by{" "}
+            {data.guardian_name} ({data.guardian_relationship})
+          </p>
+        )}
         {data.valid_until && (
           <p style={{ fontSize: "0.85rem", color: "var(--kaaya-text-muted)" }}>
             Renewal due {new Date(data.valid_until).toLocaleDateString()}
@@ -276,9 +285,21 @@ export default function StaffConsultationDetail() {
                 <span className="kaaya-badge kaaya-badge--HIGH">✗ Client does not wish to proceed</span>
               )}
             </p>
+            {data.acknowledgement.declarations && (
+              <>
+                <p style={{ margin: "12px 0 4px", fontWeight: 600 }}>Client ticked:</p>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {data.acknowledgement.declarations.statements.map((d) => (
+                    <li key={d.key} style={{ marginBottom: 4 }}>
+                      {d.text}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
             <p style={{ fontSize: "0.85rem", color: "var(--kaaya-text-muted)", marginTop: 10 }}>
               Acknowledged {new Date(data.acknowledgement.acknowledged_at).toLocaleString()}. The client's decision
-              does not remove any outstanding requirement below — staff must still follow Kaaya's treatment policy.
+              doesn't change Kaaya's own checks — still follow the notes below.
             </p>
           </>
         ) : (
@@ -303,6 +324,11 @@ export default function StaffConsultationDetail() {
           return (
             <div key={treatment.id} style={{ marginBottom: 20 }}>
               <h3 style={{ fontSize: "1rem", marginBottom: 8 }}>{treatment.name}</h3>
+              {treatment.services && treatment.services.length > 0 && (
+                <p style={{ marginTop: 0, fontSize: "0.85rem", color: "var(--kaaya-text-muted)" }}>
+                  {treatment.services.join(", ")}
+                </p>
+              )}
               {items.length === 0 ? (
                 <p style={{ color: "var(--kaaya-text-muted)", fontSize: "0.9rem" }}>No automated attention identified.</p>
               ) : (

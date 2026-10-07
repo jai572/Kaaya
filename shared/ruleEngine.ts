@@ -10,11 +10,11 @@ import type {
 
 // The Kaaya consultation screening engine.
 //
-// This never makes a clinical judgement. Every flag it produces is framed as
-// "potential implication identified — staff review required", and explicitly
-// states that final treatment suitability remains a staff decision. Rules are
-// data (treatment_rules table), not hardcoded branches, so new rules or
-// treatments can be added without changing this file.
+// This never makes a clinical judgement. Each flag carries two texts: a staff
+// note (explanation + staff_action) and a client_message in salon language
+// that tells the client what the risk is and that going ahead is their
+// informed choice. Rules are data (treatment_rules table), not hardcoded
+// branches, so new rules or treatments can be added without changing this file.
 //
 // Runs BEFORE the client signs: the client acknowledgement workflow shows
 // these flags to the client first, so there is no signature to evaluate
@@ -51,7 +51,20 @@ function evaluateAnswerCondition(
   return { matched, matchedKeys };
 }
 
-const FINAL_DECISION_NOTE = "Final treatment suitability remains a staff decision.";
+const STAFF_NOTE = "Check this with the client before starting.";
+
+function fillMessage(template: string | null | undefined, fallback: string, values: { treatments?: string; item?: string }): string {
+  if (!template) return fallback;
+  return template
+    .replace(/\{treatments\}/g, values.treatments ?? "This treatment")
+    .replace(/\{item\}/g, values.item ?? "");
+}
+
+// general_medical_information skips answers a more specific rule already
+// raised, so it has to run after every other rule regardless of row order.
+function ruleOrder(rule: TreatmentRuleRecord): number {
+  return rule.rule_type === "general_medical_information" ? 1 : 0;
+}
 
 export function screenConsultation(
   answers: AnswerInput[],
@@ -62,13 +75,15 @@ export function screenConsultation(
   const flags: ScreeningFlag[] = [];
   const coveredAnswerKeys = new Set<string>();
 
-  for (const rule of rules) {
+  const ordered = [...rules].sort((a, b) => ruleOrder(a) - ruleOrder(b));
+  for (const rule of ordered) {
     if (!rule.active) continue;
 
     switch (rule.rule_type) {
       case "previous_tint_reaction":
       case "eye_related_information":
-      case "adhesive_allergy": {
+      case "adhesive_allergy":
+      case "latex_allergy": {
         const relevantTreatments = selectedTreatments.filter((t) => matchesCategory(t, rule.applies_to_category));
         if (relevantTreatments.length === 0) break;
         if (rule.condition.source !== "answers") break;
@@ -88,8 +103,9 @@ export function screenConsultation(
           severity: rule.severity,
           title: rule.title,
           client_answer_summary: answerSummary,
-          explanation: `${rule.description_template} Selected treatment(s): ${treatmentNames}. ${FINAL_DECISION_NOTE}`,
+          explanation: `${rule.description_template} Selected treatment(s): ${treatmentNames}. ${STAFF_NOTE}`,
           staff_action: rule.staff_action,
+          client_message: fillMessage(rule.client_message, rule.description_template, { treatments: treatmentNames }),
           treatment_ids: relevantTreatments.map((t) => t.id),
         });
         break;
@@ -115,8 +131,9 @@ export function screenConsultation(
           severity: rule.severity,
           title: rule.title,
           client_answer_summary: `${answerLabel(patchTestKey)}: No`,
-          explanation: `${rule.description_template} Treatment(s) requiring a patch test: ${treatmentNames}. ${FINAL_DECISION_NOTE}`,
+          explanation: `${rule.description_template} Treatment(s) requiring a patch test: ${treatmentNames}. ${STAFF_NOTE}`,
           staff_action: rule.staff_action,
+          client_message: fillMessage(rule.client_message, rule.description_template, { treatments: treatmentNames }),
           treatment_ids: treatmentsNeedingPatchTest.map((t) => t.id),
         });
         break;
@@ -147,8 +164,9 @@ export function screenConsultation(
             severity: rule.severity,
             title: `${rule.title}: ${answerLabel(key)}`,
             client_answer_summary: `${answerLabel(key)}: Yes`,
-            explanation: `${rule.description_template} Reported item: ${answerLabel(key)}. ${FINAL_DECISION_NOTE}`,
+            explanation: `${rule.description_template} Reported item: ${answerLabel(key)}. ${STAFF_NOTE}`,
             staff_action: rule.staff_action,
+            client_message: fillMessage(rule.client_message, rule.description_template, { item: answerLabel(key) }),
             // No rule currently ties this to a specific treatment — shown as
             // general in the staff UI rather than guessing an attribution.
             treatment_ids: [],

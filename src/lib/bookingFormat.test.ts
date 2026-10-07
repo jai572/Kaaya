@@ -93,10 +93,10 @@ describe("groupServicesByCategory", () => {
 
   it("lists new head treatments after the known ones", () => {
     const groups = groupServicesByCategory([
-      { id: "1", category_slug: "tinting" },
+      { id: "1", category_slug: "facials" },
       { id: "2", category_slug: "threading" },
     ]);
-    expect(groups.map((g) => g.slug)).toEqual(["threading", "tinting"]);
+    expect(groups.map((g) => g.slug)).toEqual(["threading", "facials"]);
   });
 });
 

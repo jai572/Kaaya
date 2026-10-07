@@ -30,6 +30,7 @@ export function getTreatments() {
       uses_adhesive: boolean;
       requires_patch_test: boolean;
     }[];
+    services: { id: string; name: string; category_slug: string; treatment_id: string }[];
   }>;
 }
 
@@ -43,6 +44,7 @@ export interface ClientFlag {
   client_answer_summary: string;
   explanation: string;
   staff_action: string;
+  client_message: string | null;
   treatment_ids: string[];
 }
 

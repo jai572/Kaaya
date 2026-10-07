@@ -43,6 +43,8 @@ export type BookingCategoryGroup = {
 
 export const BOOKING_CATEGORY_GROUPS: BookingCategoryGroup[] = [
   { slug: "threading", label: "Threading" },
+  { slug: "tinting", label: "Tinting" },
+  { slug: "brow-lamination", label: "Brow Lamination" },
   { slug: "waxing", label: "Waxing" },
   { slug: "nails", label: "Nails" },
   { slug: "lash-lift", label: "Lash Lift & Curl" },
@@ -55,6 +57,8 @@ export const BOOKING_CATEGORY_GROUPS: BookingCategoryGroup[] = [
 // from the booking flow if a new category is ever added in Staff > Services.
 const CATEGORY_SLUG_MAP: Record<string, string> = {
   threading: "threading",
+  tinting: "tinting",
+  "brow-lamination": "brow-lamination",
   waxing: "waxing",
   nails: "nails",
   shellac: "nails",

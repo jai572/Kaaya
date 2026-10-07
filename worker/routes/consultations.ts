@@ -5,6 +5,7 @@ import { consultationSubmissionSchema, validateAnswerCompleteness, finalizeConsu
 import { recordAuditEvent } from "../lib/audit";
 import { screenConsultation } from "../../shared/ruleEngine";
 import { ALL_QUESTIONS } from "../../shared/questions";
+import { DECLARATION_TEXT, DECLARATIONS_VERSION, requiredDeclarations, type DeclarationKey } from "../../shared/declarations";
 import type { TreatmentRuleRecord } from "../../shared/types";
 
 const QUESTION_META = new Map(ALL_QUESTIONS.map((q) => [q.key, { section: q.section, label: q.label }]));
@@ -19,6 +20,7 @@ type FlagRow = {
   client_answer_summary: string;
   explanation: string;
   staff_action: string;
+  client_message: string | null;
   treatment_ids: string[];
 };
 
@@ -45,15 +47,38 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
   const admin = adminClient(env);
   const email = submission.client.email.toLowerCase();
 
-  // Selected treatments must exist and be active — never trust client-supplied names/flags.
+  // The client picks from the service list; each service maps to the
+  // screening treatment its rules run against. Never trust client-supplied
+  // names/flags — both are looked up here.
+  const serviceIds = [...new Set(submission.service_ids ?? [])];
+  const servicesByTreatment = new Map<string, string[]>();
+  if (serviceIds.length > 0) {
+    const { data: picked, error: pickedError } = await admin
+      .from("services")
+      .select("id, treatment_id")
+      .in("id", serviceIds)
+      .eq("active", true)
+      .not("treatment_id", "is", null);
+    if (pickedError) return errorResponse(pickedError.message, 500);
+    if ((picked ?? []).length !== serviceIds.length) {
+      return errorResponse("One or more selected treatments are invalid or unavailable");
+    }
+    for (const s of picked ?? []) {
+      const list = servicesByTreatment.get(s.treatment_id as string) ?? [];
+      list.push(s.id);
+      servicesByTreatment.set(s.treatment_id as string, list);
+    }
+  }
+  const treatmentIds = [...new Set([...(submission.treatment_ids ?? []), ...servicesByTreatment.keys()])];
+
   const { data: treatments, error: treatmentsError } = await admin
     .from("treatments")
-    .select("id, name, is_tint, is_eyelash, uses_adhesive, requires_patch_test")
-    .in("id", submission.treatment_ids)
+    .select("id, name, is_tint, is_eyelash, uses_adhesive, uses_latex, requires_patch_test")
+    .in("id", treatmentIds)
     .eq("active", true);
 
   if (treatmentsError) return errorResponse(treatmentsError.message, 500);
-  if (!treatments || treatments.length !== submission.treatment_ids.length) {
+  if (!treatments || treatments.length !== treatmentIds.length) {
     return errorResponse("One or more selected treatments are invalid or unavailable");
   }
 
@@ -113,6 +138,8 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
       status: "draft",
       version: priorConsultation ? priorConsultation.version + 1 : 1,
       supersedes_consultation_id: priorConsultation?.id ?? null,
+      guardian_name: submission.guardian?.name ?? null,
+      guardian_relationship: submission.guardian?.relationship ?? null,
     })
     .select("id, access_token, version")
     .single();
@@ -154,7 +181,11 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
   if (answersError) return errorResponse(answersError.message, 500);
 
   const { error: servicesError } = await admin.from("consultation_services").insert(
-    submission.treatment_ids.map((treatment_id) => ({ consultation_id: consultationId, treatment_id }))
+    treatmentIds.map((treatment_id) => ({
+      consultation_id: consultationId,
+      treatment_id,
+      service_ids: servicesByTreatment.get(treatment_id) ?? [],
+    }))
   );
   if (servicesError) return errorResponse(servicesError.message, 500);
 
@@ -207,8 +238,9 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
         title: "New treatment not previously covered",
         client_answer_summary: `Requested: ${newlyRequested.map((t) => t.name).join(", ")}`,
         explanation:
-          "This treatment was not included in the client's most recent consultation and has not been previously screened, even though that consultation is still within its validity period. Final treatment suitability remains a staff decision.",
-        staff_action: "Confirm this treatment has been reviewed before proceeding.",
+          "This treatment was not included in the client's most recent consultation, so it hasn't been screened before.",
+        staff_action: "Go through this treatment with the client before starting.",
+        client_message: `You haven't had ${newlyRequested.map((t) => t.name).join(", ")} with us before. Your therapist will run through it with you before starting.`,
         treatment_ids: newlyRequested.map((t) => t.id),
       });
       result.summary.total += 1;
@@ -232,10 +264,13 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
           client_answer_summary: f.client_answer_summary,
           explanation: f.explanation,
           staff_action: f.staff_action,
+          client_message: f.client_message,
           treatment_ids: f.treatment_ids,
         }))
       )
-      .select("id, rule_key, group_key, category, severity, title, client_answer_summary, explanation, staff_action, treatment_ids");
+      .select(
+        "id, rule_key, group_key, category, severity, title, client_answer_summary, explanation, staff_action, client_message, treatment_ids"
+      );
     if (flagsError) return errorResponse(flagsError.message, 500);
     insertedFlags = (flagsData ?? []) as FlagRow[];
 
@@ -308,7 +343,7 @@ export async function finalizeConsultation(request: Request, env: Env, consultat
   const admin = adminClient(env);
   const { data: consultation, error } = await admin
     .from("consultations")
-    .select("id, access_token, status, locked_at")
+    .select("id, access_token, status, locked_at, guardian_name")
     .eq("id", consultationId)
     .maybeSingle();
 
@@ -324,9 +359,26 @@ export async function finalizeConsultation(request: Request, env: Env, consultat
 
   const { data: flags, error: flagsError } = await admin
     .from("consultation_flags")
-    .select("id, title, severity, category, client_answer_summary, explanation, staff_action, treatment_ids")
+    .select("id, rule_key, title, severity, category, client_answer_summary, explanation, staff_action, client_message, treatment_ids")
     .eq("consultation_id", consultationId);
   if (flagsError) return errorResponse(flagsError.message, 500);
+
+  // The client's own statements are what put responsibility for undisclosed
+  // information and informed risks on them, so they're required, not optional.
+  const hasUnmetPatchTest = (flags ?? []).some((f) => f.rule_key === "patch_test_required");
+  const required = requiredDeclarations({
+    decision: input.decision,
+    patchTestFlagged: hasUnmetPatchTest,
+    hasGuardian: !!consultation.guardian_name,
+  });
+  const ticked = new Set(input.declarations);
+  if (required.some((k) => !ticked.has(k))) {
+    return errorResponse("Please tick every statement before signing");
+  }
+  const declarations = {
+    version: DECLARATIONS_VERSION,
+    statements: required.map((key: DeclarationKey) => ({ key, text: DECLARATION_TEXT[key] })),
+  };
 
   const allFlagIds = new Set((flags ?? []).map((f) => f.id));
   const acknowledgedSet = new Set(input.acknowledged_flag_ids);
@@ -346,6 +398,7 @@ export async function finalizeConsultation(request: Request, env: Env, consultat
     flag_ids: input.acknowledged_flag_ids,
     explanation_snapshot: explanationSnapshot,
     client_decision: input.decision,
+    declarations,
     device_info: input.device_info ?? null,
   });
   if (ackError) return errorResponse(ackError.message, 500);
@@ -369,7 +422,6 @@ export async function finalizeConsultation(request: Request, env: Env, consultat
   // predates the acknowledgement workflow: true if the client chose to
   // continue despite an unmet patch-test requirement being among the flags
   // they acknowledged.
-  const hasUnmetPatchTest = (flags ?? []).some((f) => f.title === "Patch test not recorded");
   const consentWithoutPatchTest = input.decision === "continue" && hasUnmetPatchTest;
 
   const { error: signatureError } = await admin.from("signatures").insert({
@@ -446,7 +498,9 @@ export async function getClientConsultation(request: Request, env: Env, consulta
         .maybeSingle(),
       admin
         .from("consultation_flags")
-        .select("id, rule_key, group_key, category, severity, title, client_answer_summary, explanation, staff_action, treatment_ids")
+        .select(
+          "id, rule_key, group_key, category, severity, title, client_answer_summary, explanation, staff_action, client_message, treatment_ids"
+        )
         .eq("consultation_id", consultationId),
       admin
         .from("consultation_acknowledgements")

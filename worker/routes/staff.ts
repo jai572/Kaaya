@@ -91,7 +91,12 @@ export async function listStaffConsultations(request: Request, env: Env): Promis
     staff_reviews: { decision: string; decided_at: string }[];
   };
 
-  const allRows = (data ?? []) as unknown as Row[];
+  // A form the client never signed (stopped at the review step) is clutter
+  // after a week; it stays in the database and on the client's record.
+  const abandonedBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const allRows = ((data ?? []) as unknown as Row[]).filter(
+    (c) => !(c.status === "screening_complete" && (c.submitted_at ?? "") < abandonedBefore)
+  );
   const supersededIds = new Set(allRows.map((c) => c.supersedes_consultation_id).filter((id): id is string => !!id));
 
   const rows = allRows.map((c) => {
@@ -128,6 +133,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
     .from("consultations")
     .select(
       `id, status, version, submitted_at, screened_at, reviewed_at, locked_at, valid_until, supersedes_consultation_id,
+       guardian_name, guardian_relationship,
        clients(id, first_name, last_name, email, phone, address)`
     )
     .eq("id", consultationId)
@@ -151,7 +157,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
       .select("section, question_key, question_label, answer_value, additional_info")
       .eq("consultation_id", consultationId)
       .order("section"),
-    admin.from("consultation_services").select("treatments(id, name)").eq("consultation_id", consultationId),
+    admin.from("consultation_services").select("service_ids, treatments(id, name)").eq("consultation_id", consultationId),
     admin
       .from("consultation_flags")
       .select(
@@ -175,7 +181,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
     admin.from("app_settings").select("value").eq("key", "renewal_reminder_days_before_expiry").maybeSingle(),
     admin
       .from("consultation_acknowledgements")
-      .select("client_decision, flag_ids, acknowledged_at")
+      .select("client_decision, flag_ids, acknowledged_at, declarations")
       .eq("consultation_id", consultationId)
       .maybeSingle(),
   ]);
@@ -190,13 +196,24 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
   const renewalReminderDays =
     typeof renewalSetting?.value === "number" ? renewalSetting.value : RENEWAL_REMINDER_DAYS_DEFAULT;
 
+  // Which items the client actually ticked, under each screening treatment.
+  const serviceRows = (services ?? []) as unknown as {
+    service_ids: string[];
+    treatments: { id: string; name: string } | null;
+  }[];
+  const pickedIds = [...new Set(serviceRows.flatMap((s) => s.service_ids))];
+  const { data: pickedServices } = pickedIds.length
+    ? await admin.from("services").select("id, name").in("id", pickedIds)
+    : { data: [] as { id: string; name: string }[] };
+  const serviceNames = new Map((pickedServices ?? []).map((s) => [s.id, s.name]));
+
   return json({
     ...consultation,
     validity_status: validityStatus(consultation.valid_until, !!supersededBy, renewalReminderDays),
     superseded_by_consultation_id: supersededBy?.id ?? null,
-    treatments: ((services ?? []) as unknown as { treatments: { id: string; name: string } | null }[]).map(
-      (s) => s.treatments
-    ),
+    treatments: serviceRows
+      .filter((s) => s.treatments)
+      .map((s) => ({ ...s.treatments!, services: s.service_ids.map((id) => serviceNames.get(id) ?? "Unknown") })),
     answers,
     flags,
     signature,

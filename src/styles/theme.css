@@ -464,3 +464,58 @@ button {
      the first line of this option's (often multi-line) label text. */
   margin-top: 2px;
 }
+
+.kaaya-question-group + .kaaya-question-group {
+  margin-top: 12px;
+}
+
+.kaaya-question-group__title {
+  font-size: 0.95rem;
+  margin: 8px 0 0;
+  color: var(--kaaya-text-muted);
+}
+
+.kaaya-accordion {
+  border: 1px solid var(--kaaya-border);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.kaaya-accordion__head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  min-height: 52px;
+  background: transparent;
+  border: none;
+  color: var(--kaaya-text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.kaaya-accordion__head[aria-expanded="true"] {
+  border-bottom: 1px solid var(--kaaya-border);
+}
+
+.kaaya-accordion__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.2rem;
+}
+
+.kaaya-accordion__count {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--kaaya-accent);
+}
+
+.kaaya-accordion__body {
+  padding: 10px 10px 0;
+}

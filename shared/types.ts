@@ -15,6 +15,8 @@ export interface QuestionDef {
   required: boolean;
   /** When true and the answer is truthy, the UI should offer a free-text "please provide details" field. */
   allowAdditionalInfo?: boolean;
+  /** Heading the form shows this question under (medical section only). */
+  group?: string;
 }
 
 export interface AnswerInput {
@@ -35,7 +37,12 @@ export interface ConsultationSubmission {
     address?: string;
   };
   answers: AnswerInput[];
-  treatment_ids: string[];
+  /** What the client picked from the treatment list; mapped server-side to screening treatments. */
+  service_ids?: string[];
+  /** Legacy/direct screening treatments. At least one of service_ids / treatment_ids is required. */
+  treatment_ids?: string[];
+  /** Set when a parent or guardian fills the form in for someone under 16. */
+  guardian?: { name: string; relationship: string } | null;
 }
 
 export type ClientDecision = "continue" | "decline";
@@ -52,6 +59,8 @@ export interface DrawnSignatureInput {
 export interface FinalizeConsultationInput {
   decision: ClientDecision;
   acknowledged_flag_ids: string[];
+  /** Keys from shared/declarations.ts the client ticked. */
+  declarations: string[];
   signature: DrawnSignatureInput;
   device_info?: Record<string, unknown>;
 }
@@ -62,6 +71,7 @@ export interface TreatmentRecord {
   is_tint: boolean;
   is_eyelash: boolean;
   uses_adhesive: boolean;
+  uses_latex?: boolean;
   requires_patch_test: boolean;
 }
 
@@ -75,7 +85,7 @@ export interface RuleCondition {
   match?: "any" | "all";
 }
 
-export type RuleApplyCategory = "is_tint" | "is_eyelash" | "uses_adhesive" | null;
+export type RuleApplyCategory = "is_tint" | "is_eyelash" | "uses_adhesive" | "uses_latex" | null;
 
 export interface TreatmentRuleRecord {
   id: string;
@@ -84,6 +94,7 @@ export interface TreatmentRuleRecord {
     | "previous_tint_reaction"
     | "eye_related_information"
     | "adhesive_allergy"
+    | "latex_allergy"
     | "patch_test_required"
     | "consent_without_patch_test"
     | "general_medical_information";
@@ -94,6 +105,8 @@ export interface TreatmentRuleRecord {
   title: string;
   description_template: string;
   staff_action: string;
+  /** What the client reads, in salon language. {treatments} / {item} are filled in. */
+  client_message?: string | null;
   active: boolean;
   /** Lets the staff UI cluster related flags (e.g. two patch-test reasons) under one heading without merging their underlying rows. */
   group_key: string | null;
@@ -111,6 +124,7 @@ export interface ScreeningFlag {
   client_answer_summary: string;
   explanation: string;
   staff_action: string;
+  client_message: string;
   /** Which selected treatment(s) this flag concerns. Empty = general — not attributed to a specific treatment because no rule actually ties it to one. */
   treatment_ids: string[];
 }

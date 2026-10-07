@@ -19,11 +19,20 @@ export const contactDetailsSchema = z.object({
   address: z.string().trim().optional(),
 });
 
-export const consultationSubmissionSchema = z.object({
-  client: contactDetailsSchema,
-  answers: z.array(answerInputSchema),
-  treatment_ids: z.array(z.string().uuid()).min(1, "Select at least one treatment"),
-});
+export const consultationSubmissionSchema = z
+  .object({
+    client: contactDetailsSchema,
+    answers: z.array(answerInputSchema),
+    service_ids: z.array(z.string().uuid()).max(30).optional(),
+    treatment_ids: z.array(z.string().uuid()).max(30).optional(),
+    guardian: z
+      .object({ name: z.string().trim().min(2, "Guardian name is required"), relationship: z.string().trim().min(2).max(60) })
+      .nullable()
+      .optional(),
+  })
+  .refine((s) => (s.service_ids?.length ?? 0) + (s.treatment_ids?.length ?? 0) > 0, {
+    message: "Select at least one treatment",
+  });
 
 // A blank canvas can still export as a small valid PNG data URL, so this
 // floor is a heuristic, not a cryptographic guarantee -- the real signal is
@@ -43,6 +52,7 @@ export const drawnSignatureInputSchema = z.object({
 export const finalizeConsultationSchema = z.object({
   decision: z.enum(["continue", "decline"]),
   acknowledged_flag_ids: z.array(z.string().uuid()),
+  declarations: z.array(z.string()).max(20).default([]),
   signature: drawnSignatureInputSchema,
   device_info: z.record(z.string(), z.unknown()).optional(),
 });
