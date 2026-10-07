@@ -81,7 +81,7 @@ export const TREATMENT_CATEGORIES: TreatmentCategory[] = [
   {
     slug: "tinting",
     name: "Tinting",
-    summary: "Eyebrow and eyelash tinting, including henna and hybrid formulas.",
+    summary: "Eyebrow and eyelash tinting, plus henna and hybrid brows.",
     patchTestRequired: true,
     items: [
       { name: "Tinting - Eyebrow", price: "£9" },
@@ -90,8 +90,6 @@ export const TREATMENT_CATEGORIES: TreatmentCategory[] = [
       { name: "Henna Brow Tint - Eyebrow", price: "£20" },
       { name: "Henna Brow + Eyelash Tint", price: "£29" },
       { name: "Hybrid Tint - Eyebrow", price: "£15" },
-      { name: "Hybrid Tint - Eyelash", price: "£20" },
-      { name: "Hybrid Tint - Eyebrow & Eyelash", price: "£30" },
     ],
   },
   {
