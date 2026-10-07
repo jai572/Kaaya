@@ -90,6 +90,7 @@ export const TREATMENT_CATEGORIES: TreatmentCategory[] = [
       { name: "Henna Brow Tint - Eyebrow", price: "£20" },
       { name: "Henna Brow + Eyelash Tint", price: "£29" },
       { name: "Hybrid Tint - Eyebrow", price: "£15" },
+      { name: "Hybrid Brow + Eyelash Tint", price: "£30" },
     ],
   },
   {
