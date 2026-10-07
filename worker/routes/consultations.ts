@@ -55,7 +55,7 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
   if (serviceIds.length > 0) {
     const { data: picked, error: pickedError } = await admin
       .from("services")
-      .select("id, treatment_id")
+      .select("id, treatment_id, extra_treatment_ids")
       .in("id", serviceIds)
       .eq("active", true)
       .not("treatment_id", "is", null);
@@ -63,10 +63,14 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
     if ((picked ?? []).length !== serviceIds.length) {
       return errorResponse("One or more selected treatments are invalid or unavailable");
     }
+    // A combined service (e.g. henna brows + regular lash tint) is screened
+    // against every treatment it involves.
     for (const s of picked ?? []) {
-      const list = servicesByTreatment.get(s.treatment_id as string) ?? [];
-      list.push(s.id);
-      servicesByTreatment.set(s.treatment_id as string, list);
+      for (const treatmentId of [s.treatment_id as string, ...((s.extra_treatment_ids as string[] | null) ?? [])]) {
+        const list = servicesByTreatment.get(treatmentId) ?? [];
+        list.push(s.id);
+        servicesByTreatment.set(treatmentId, list);
+      }
     }
   }
   const treatmentIds = [...new Set([...(submission.treatment_ids ?? []), ...servicesByTreatment.keys()])];
