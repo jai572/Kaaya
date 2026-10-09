@@ -17,6 +17,8 @@ export interface QuestionDef {
   allowAdditionalInfo?: boolean;
   /** Heading the form shows this question under (medical section only). */
   group?: string;
+  /** Only asked when a chosen treatment has one of these flags (e.g. "is_wax"). Unasked = "No". */
+  showFor?: TreatmentFlag[];
 }
 
 export interface AnswerInput {
@@ -73,9 +75,31 @@ export interface TreatmentRecord {
   uses_adhesive: boolean;
   uses_latex?: boolean;
   requires_patch_test: boolean;
+  contains_ppd?: boolean;
+  is_henna?: boolean;
+  is_lift?: boolean;
+  is_lamination?: boolean;
+  is_wax?: boolean;
+  is_gel?: boolean;
 }
 
-export type RuleConditionSource = "answers" | "signature";
+export type TreatmentFlag =
+  | "is_tint"
+  | "is_eyelash"
+  | "uses_adhesive"
+  | "uses_latex"
+  | "requires_patch_test"
+  | "contains_ppd"
+  | "is_henna"
+  | "is_lift"
+  | "is_lamination"
+  | "is_wax"
+  | "is_gel";
+
+/** warn: client decides. doctor: client must confirm their doctor's OK. stop: can't go ahead. */
+export type FlagOutcome = "warn" | "doctor" | "stop";
+
+export type RuleConditionSource = "answers" | "signature" | "treatments";
 
 export interface RuleCondition {
   source: RuleConditionSource;
@@ -83,9 +107,11 @@ export interface RuleCondition {
   field?: string;
   expect: boolean;
   match?: "any" | "all";
+  /** treatment_combination: every one of these flags must be present among the chosen treatments. */
+  requires_flags?: TreatmentFlag[];
 }
 
-export type RuleApplyCategory = "is_tint" | "is_eyelash" | "uses_adhesive" | "uses_latex" | null;
+export type RuleApplyCategory = Exclude<TreatmentFlag, "requires_patch_test"> | null;
 
 export interface TreatmentRuleRecord {
   id: string;
@@ -95,13 +121,18 @@ export interface TreatmentRuleRecord {
     | "eye_related_information"
     | "adhesive_allergy"
     | "latex_allergy"
+    | "contraindication"
+    | "treatment_combination"
     | "patch_test_required"
     | "consent_without_patch_test"
     | "general_medical_information";
   applies_to_category: RuleApplyCategory;
+  /** Matches a treatment with ANY of these flags; takes precedence over applies_to_category when non-empty. */
+  applies_to_any?: TreatmentFlag[] | null;
   applies_to_treatment_id: string | null;
   condition: RuleCondition;
   severity: Severity;
+  outcome?: FlagOutcome;
   title: string;
   description_template: string;
   staff_action: string;
@@ -120,6 +151,7 @@ export interface ScreeningFlag {
   group_key: string | null;
   category: string | null;
   severity: Severity;
+  outcome: FlagOutcome;
   title: string;
   client_answer_summary: string;
   explanation: string;

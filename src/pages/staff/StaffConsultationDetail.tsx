@@ -12,8 +12,14 @@ type Flag = {
   client_answer_summary: string;
   explanation: string;
   staff_action: string;
+  outcome?: "warn" | "doctor" | "stop";
   treatment_ids: string[];
   group_key: string | null;
+};
+
+const OUTCOME_CHIP: Record<string, { label: string; severity: Severity }> = {
+  stop: { label: "DO NOT TREAT", severity: "HIGH" },
+  doctor: { label: "CLIENT CONFIRMED DOCTOR'S OK", severity: "MEDIUM" },
 };
 
 type Answer = {
@@ -127,7 +133,15 @@ function FlagGroup({ item, expanded, onToggle }: { item: DisplayItem; expanded: 
         onClick={onToggle}
       >
         <span>
-          <span className={`kaaya-badge kaaya-badge--${item.severity}`}>{item.severity}</span> <strong>{item.title}</strong>
+          <span className={`kaaya-badge kaaya-badge--${item.severity}`}>{item.severity}</span>{" "}
+          {[...new Set(item.members.map((m) => m.outcome).filter((o): o is "stop" | "doctor" => o === "stop" || o === "doctor"))].map(
+            (o) => (
+              <span key={o} className={`kaaya-badge kaaya-badge--${OUTCOME_CHIP[o].severity}`} style={{ marginRight: 6 }}>
+                {OUTCOME_CHIP[o].label}
+              </span>
+            )
+          )}
+          <strong>{item.title}</strong>
         </span>
         <span>{expanded ? "−" : "+"}</span>
       </div>

@@ -161,7 +161,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
     admin
       .from("consultation_flags")
       .select(
-        "id, severity, category, title, client_answer_summary, explanation, staff_action, created_at, treatment_ids, group_key"
+        "id, severity, category, title, client_answer_summary, explanation, staff_action, outcome, created_at, treatment_ids, group_key"
       )
       .eq("consultation_id", consultationId)
       .order("severity"),

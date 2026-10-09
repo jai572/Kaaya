@@ -30,7 +30,13 @@ export function getTreatments() {
       uses_adhesive: boolean;
       requires_patch_test: boolean;
     }[];
-    services: { id: string; name: string; category_slug: string; treatment_id: string }[];
+    services: {
+      id: string;
+      name: string;
+      category_slug: string;
+      treatment_id: string;
+      extra_treatment_ids: string[] | null;
+    }[];
   }>;
 }
 
@@ -45,6 +51,7 @@ export interface ClientFlag {
   explanation: string;
   staff_action: string;
   client_message: string | null;
+  outcome: "warn" | "doctor" | "stop";
   treatment_ids: string[];
 }
 

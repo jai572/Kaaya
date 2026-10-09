@@ -2,12 +2,13 @@
 // wording the client saw alongside their ticks. Bump DECLARATIONS_VERSION
 // whenever any text changes.
 
-export const DECLARATIONS_VERSION = "2026-10-salon-v1";
+export const DECLARATIONS_VERSION = "2026-10-salon-v2";
 
 export type DeclarationKey =
   | "accurate_information"
   | "understood_and_accept"
   | "no_patch_test_risk"
+  | "doctor_ok"
   | "tell_us_changes"
   | "aftercare"
   | "guardian";
@@ -17,8 +18,11 @@ export const DECLARATION_TEXT: Record<DeclarationKey, string> = {
     "The information I've given is true and complete. I understand Kaaya relies on it, and that leaving something out could cause a reaction that Kaaya is not responsible for.",
   understood_and_accept:
     "I've read the notes above about my treatment and choose to go ahead. I understand every treatment carries a small risk of redness, irritation or reaction, and I accept that.",
+  // v1 only: patch tests can no longer be waived. Kept so old records still read.
   no_patch_test_risk:
     "I've been offered a patch test and choose to go ahead without one. I accept the risk of an allergic reaction.",
+  doctor_ok:
+    "My doctor has told me the treatments marked \"needs your doctor's OK\" are fine for me.",
   tell_us_changes:
     "I'll tell my therapist before each visit if my health, medication or allergies change, or if I'm pregnant.",
   aftercare:
@@ -30,13 +34,13 @@ export const DECLARATION_TEXT: Record<DeclarationKey, string> = {
 /** Which declarations must be ticked for this consultation. */
 export function requiredDeclarations(opts: {
   decision: "continue" | "decline";
-  patchTestFlagged: boolean;
+  doctorFlagged: boolean;
   hasGuardian: boolean;
 }): DeclarationKey[] {
   const keys: DeclarationKey[] = ["accurate_information"];
   if (opts.decision === "continue") {
     keys.push("understood_and_accept");
-    if (opts.patchTestFlagged) keys.push("no_patch_test_risk");
+    if (opts.doctorFlagged) keys.push("doctor_ok");
     keys.push("tell_us_changes", "aftercare");
   }
   if (opts.hasGuardian) keys.push("guardian");

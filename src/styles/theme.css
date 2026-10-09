@@ -519,3 +519,12 @@ button {
 .kaaya-accordion__body {
   padding: 10px 10px 0;
 }
+
+.kaaya-notice--stop {
+  border-color: var(--kaaya-high);
+}
+
+.kaaya-flag-outcome {
+  display: block;
+  margin-bottom: 4px;
+}

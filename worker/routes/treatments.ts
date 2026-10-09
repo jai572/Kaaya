@@ -10,12 +10,14 @@ export async function listTreatments(env: Env): Promise<Response> {
   const [treatmentsRes, servicesRes] = await Promise.all([
     admin
       .from("treatments")
-      .select("id, name, is_tint, is_eyelash, uses_adhesive, uses_latex, requires_patch_test, display_order")
+      .select(
+        "id, name, is_tint, is_eyelash, uses_adhesive, uses_latex, requires_patch_test, contains_ppd, is_henna, is_lift, is_lamination, is_wax, is_gel, display_order"
+      )
       .eq("active", true)
       .order("display_order", { ascending: true }),
     admin
       .from("services")
-      .select("id, name, category_slug, treatment_id, display_order")
+      .select("id, name, category_slug, treatment_id, extra_treatment_ids, display_order")
       .eq("active", true)
       .not("treatment_id", "is", null)
       .order("category_slug", { ascending: true })

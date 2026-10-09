@@ -3,9 +3,10 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   PERSONAL_PROFILE_QUESTIONS,
   MEDICAL_ASSESSMENT_QUESTIONS,
+  MANUFACTURER_QUESTIONS,
   PATCH_TEST_QUESTIONS,
 } from "@shared/questions";
-import type { AnswerInput, ClientDecision } from "@shared/types";
+import type { AnswerInput, ClientDecision, QuestionDef, TreatmentFlag } from "@shared/types";
 import { DECLARATION_TEXT, requiredDeclarations, type DeclarationKey } from "@shared/declarations";
 import {
   getTreatments,
@@ -23,17 +24,28 @@ type Treatment = {
   name: string;
 };
 
-type ServiceOption = { id: string; name: string; category_slug: string; treatment_id: string };
+type ServiceOption = {
+  id: string;
+  name: string;
+  category_slug: string;
+  treatment_id: string;
+  extra_treatment_ids?: string[] | null;
+};
+type TreatmentDef = { id: string } & Partial<Record<TreatmentFlag, boolean>>;
 
-const MEDICAL_GROUPS = [...new Set(MEDICAL_ASSESSMENT_QUESTIONS.map((q) => q.group ?? "Other"))];
+const HEALTH_QUESTIONS = [...MEDICAL_ASSESSMENT_QUESTIONS, ...MANUFACTURER_QUESTIONS];
+
+function isAsked(q: QuestionDef, activeFlags: Set<TreatmentFlag>): boolean {
+  return !q.showFor || q.showFor.some((f) => activeFlags.has(f));
+}
 
 type AnswersState = Record<string, { value: boolean | string; additional_info?: string }>;
 
 const STEPS = [
   "intro",
   "profile",
-  "medical",
   "treatment",
+  "medical",
   "patch_test",
   "declaration",
   "review_flags",
@@ -42,6 +54,12 @@ const STEPS = [
 type Step = (typeof STEPS)[number];
 
 const SEVERITY_RANK: Record<ClientFlag["severity"], number> = { HIGH: 3, MEDIUM: 2, INFORMATION: 1 };
+
+const OUTCOME_LABEL: Record<ClientFlag["outcome"], string> = {
+  stop: "Can't go ahead today. ",
+  doctor: "Needs your doctor's OK. ",
+  warn: "",
+};
 
 function groupFlagsByTreatment(flags: ClientFlag[], treatments: Treatment[]) {
   const perTreatment = treatments.map((t) => ({
@@ -65,6 +83,7 @@ export default function ConsultationForm() {
   const bookingReference = searchParams.get("booking_reference");
 
   const [services, setServices] = useState<ServiceOption[]>([]);
+  const [treatmentDefs, setTreatmentDefs] = useState<TreatmentDef[]>([]);
   const [treatmentsLoading, setTreatmentsLoading] = useState(true);
   const [treatmentsError, setTreatmentsError] = useState<string | null>(null);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
@@ -78,7 +97,7 @@ export default function ConsultationForm() {
   // something. Without this, a client with no conditions to report would
   // have to click all ~29 boxes just to make the Next button notice.
   const [answers, setAnswers] = useState<AnswersState>(() =>
-    Object.fromEntries(MEDICAL_ASSESSMENT_QUESTIONS.map((q) => [q.key, { value: false }]))
+    Object.fromEntries(HEALTH_QUESTIONS.map((q) => [q.key, { value: false }]))
   );
   const [legalName, setLegalName] = useState("");
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
@@ -136,7 +155,10 @@ export default function ConsultationForm() {
     setTreatmentsLoading(true);
     setTreatmentsError(null);
     getTreatments()
-      .then((res) => setServices(res.services))
+      .then((res) => {
+        setServices(res.services);
+        setTreatmentDefs(res.treatments as TreatmentDef[]);
+      })
       .catch(() => setTreatmentsError("Could not load the treatment list."))
       .finally(() => setTreatmentsLoading(false));
   }
@@ -191,14 +213,37 @@ export default function ConsultationForm() {
   const guardianComplete = !forMinor || (guardianName.trim().length > 1 && guardianRelationship.trim().length > 1);
   const profileComplete = Object.keys(profileFieldErrors).length === 0 && guardianComplete;
 
-  const medicalComplete = MEDICAL_ASSESSMENT_QUESTIONS.every((q) => typeof answers[q.key]?.value === "boolean");
+  // Which treatment types the chosen services involve: drives which extra
+  // questions are asked (unasked ones count as "No").
+  const activeFlags = useMemo(() => {
+    const flagsOn = new Set<TreatmentFlag>();
+    const byId = new Map(treatmentDefs.map((t) => [t.id, t]));
+    for (const service of services.filter((s) => selectedServiceIds.includes(s.id))) {
+      for (const id of [service.treatment_id, ...(service.extra_treatment_ids ?? [])]) {
+        const t = byId.get(id);
+        if (!t) continue;
+        for (const [key, value] of Object.entries(t)) if (value === true) flagsOn.add(key as TreatmentFlag);
+      }
+    }
+    return flagsOn;
+  }, [services, treatmentDefs, selectedServiceIds]);
+  const askedHealth = HEALTH_QUESTIONS.filter((q) => isAsked(q, activeFlags));
+  const healthGroups = [...new Set(askedHealth.map((q) => q.group ?? "Other"))];
+  const needsPatchTest = activeFlags.has("requires_patch_test");
+  const askedPatch = PATCH_TEST_QUESTIONS.filter((q) => q.key === "visited_before" || needsPatchTest);
+  const answerOf = (q: QuestionDef, asked: QuestionDef[]) =>
+    asked.includes(q) ? ((answers[q.key]?.value as boolean) ?? false) : false;
+
+  const medicalComplete = askedHealth.every((q) => typeof answers[q.key]?.value === "boolean");
   const treatmentComplete = selectedServiceIds.length > 0;
-  const patchTestComplete = PATCH_TEST_QUESTIONS.every((q) => typeof answers[q.key]?.value === "boolean");
+  const patchTestComplete = askedPatch
+    .filter((q) => q.key !== "patch_test_changes" || answers.patch_test_done?.value === true)
+    .every((q) => typeof answers[q.key]?.value === "boolean");
   const reviewFlagsComplete = decision !== null;
   const declarationKeys = decision
     ? requiredDeclarations({
         decision,
-        patchTestFlagged: flags.some((f) => f.rule_key === "patch_test_required"),
+        doctorFlagged: flags.some((f) => f.outcome === "doctor"),
         hasGuardian: forMinor,
       })
     : [];
@@ -236,14 +281,15 @@ export default function ConsultationForm() {
     setError(null);
     try {
       const answerList: AnswerInput[] = [
-        ...MEDICAL_ASSESSMENT_QUESTIONS.map((q) => ({
+        ...HEALTH_QUESTIONS.map((q) => ({
           question_key: q.key,
-          answer_value: (answers[q.key]?.value as boolean) ?? false,
-          additional_info: answers[q.key]?.additional_info ?? null,
+          answer_value: answerOf(q, askedHealth),
+          additional_info: askedHealth.includes(q) ? answers[q.key]?.additional_info ?? null : null,
         })),
         ...PATCH_TEST_QUESTIONS.map((q) => ({
           question_key: q.key,
-          answer_value: (answers[q.key]?.value as boolean) ?? false,
+          answer_value:
+            q.key === "patch_test_changes" && answers.patch_test_done?.value !== true ? false : answerOf(q, askedPatch),
         })),
       ];
 
@@ -325,6 +371,9 @@ export default function ConsultationForm() {
   }
 
   const { perTreatment, general } = groupFlagsByTreatment(flags, selectedTreatmentRecords);
+  const blockedIds = new Set(flags.filter((f) => f.outcome === "stop").flatMap((f) => f.treatment_ids));
+  const blockedTreatments = selectedTreatmentRecords.filter((t) => blockedIds.has(t.id));
+  const allBlocked = selectedTreatmentRecords.length > 0 && blockedTreatments.length === selectedTreatmentRecords.length;
 
   return (
     <div className="kaaya-shell">
@@ -422,10 +471,10 @@ export default function ConsultationForm() {
           <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>
             Tick anything that applies to you now or recently. Leave the rest unticked.
           </p>
-          {MEDICAL_GROUPS.map((group) => (
+          {healthGroups.map((group) => (
             <div key={group} className="kaaya-question-group">
               <h3 className="kaaya-question-group__title">{group}</h3>
-          {MEDICAL_ASSESSMENT_QUESTIONS.filter((q) => (q.group ?? "Other") === group).map((q) => {
+          {askedHealth.filter((q) => (q.group ?? "Other") === group).map((q) => {
             const checked = (answers[q.key]?.value as boolean) ?? false;
             return (
               <div key={q.key}>
@@ -506,7 +555,14 @@ export default function ConsultationForm() {
 
       {step === "patch_test" && (
         <div className="kaaya-card">
-          {PATCH_TEST_QUESTIONS.map((q) => (
+          {needsPatchTest && (
+            <p style={{ color: "var(--kaaya-text-muted)", marginTop: 0 }}>
+              Some of your treatments need a patch test with us at least 48 hours before. It stays valid for 6 months.
+            </p>
+          )}
+          {askedPatch
+            .filter((q) => q.key !== "patch_test_changes" || answers.patch_test_done?.value === true)
+            .map((q) => (
             <div className="kaaya-field" key={q.key}>
               <label>{q.label}</label>
               <div className="kaaya-yesno">
@@ -550,6 +606,14 @@ export default function ConsultationForm() {
           ) : (
             <p>Nothing in your answers needs extra attention for the treatment you've chosen.</p>
           )}
+          {blockedTreatments.length > 0 && (
+            <div className="kaaya-notice kaaya-notice--stop">
+              <strong>Can't go ahead today:</strong> {blockedTreatments.map((t) => t.name).join(", ")}.{" "}
+              {allBlocked
+                ? "We're sorry. The reasons are below, and we'll happily help you choose something else."
+                : "Your other treatments can still go ahead."}
+            </div>
+          )}
 
           {perTreatment.map(({ treatment, flags: treatmentFlags }) =>
             treatmentFlags.length > 0 ? (
@@ -567,6 +631,7 @@ export default function ConsultationForm() {
                   .sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity])
                   .map((f) => (
                     <div key={f.id} className={`kaaya-flag-review kaaya-flag-review--${f.severity}`}>
+                      {f.outcome !== "warn" && <strong className="kaaya-flag-outcome">{OUTCOME_LABEL[f.outcome]}</strong>}
                       {f.client_message ?? f.explanation}
                     </div>
                   ))}
@@ -579,6 +644,7 @@ export default function ConsultationForm() {
               <h3 style={{ fontSize: "1rem", marginBottom: 8 }}>Other information</h3>
               {general.map((f) => (
                 <div key={f.id} className={`kaaya-flag-review kaaya-flag-review--${f.severity}`}>
+                  {f.outcome !== "warn" && <strong className="kaaya-flag-outcome">{OUTCOME_LABEL[f.outcome]}</strong>}
                   {f.client_message ?? f.explanation}
                 </div>
               ))}
@@ -590,21 +656,27 @@ export default function ConsultationForm() {
             right for you on the day.
           </div>
 
-          <div
-            className="kaaya-decision-option"
-            data-selected={decision === "continue"}
-            onClick={() => setDecision("continue")}
-          >
-            <input type="radio" checked={decision === "continue"} readOnly />
-            <span>I've read this and choose to go ahead with my treatment.</span>
-          </div>
+          {!allBlocked && (
+            <div
+              className="kaaya-decision-option"
+              data-selected={decision === "continue"}
+              onClick={() => setDecision("continue")}
+            >
+              <input type="radio" checked={decision === "continue"} readOnly />
+              <span>
+                {blockedTreatments.length > 0
+                  ? "I've read this and choose to go ahead with the treatments that can go ahead."
+                  : "I've read this and choose to go ahead with my treatment."}
+              </span>
+            </div>
+          )}
           <div
             className="kaaya-decision-option"
             data-selected={decision === "decline"}
             onClick={() => setDecision("decline")}
           >
             <input type="radio" checked={decision === "decline"} readOnly />
-            <span>I'd rather not go ahead for now.</span>
+            <span>{allBlocked ? "I understand." : "I'd rather not go ahead for now."}</span>
           </div>
         </div>
       )}
@@ -612,7 +684,10 @@ export default function ConsultationForm() {
       {step === "signature" && (
         <div className="kaaya-card">
           <h2 style={{ marginTop: 0 }}>Sign your form</h2>
-          <p style={{ marginTop: 0 }}>Please tick each statement:</p>
+          <p style={{ marginTop: 0, color: "var(--kaaya-text-muted)", fontSize: "0.9rem" }}>
+            You can change your mind and stop at any time, before or during your treatment.
+          </p>
+          <p>Please tick each statement:</p>
           {declarationKeys.map((key) => (
             <label key={key} className="kaaya-checkbox-row">
               <input type="checkbox" checked={ticked.has(key)} onChange={() => toggleDeclaration(key)} />
