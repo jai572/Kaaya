@@ -43,8 +43,8 @@ export interface ConsultationSubmission {
   service_ids?: string[];
   /** Legacy/direct screening treatments. At least one of service_ids / treatment_ids is required. */
   treatment_ids?: string[];
-  /** Set when a parent or guardian fills the form in for someone under 16. */
-  guardian?: { name: string; relationship: string } | null;
+  /** Set when a parent or guardian fills the form in for someone under 18. */
+  guardian?: { name: string; relationship: string; under_16: boolean } | null;
 }
 
 export type ClientDecision = "continue" | "decline";

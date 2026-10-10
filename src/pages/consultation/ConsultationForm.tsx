@@ -7,7 +7,7 @@ import {
   PATCH_TEST_QUESTIONS,
 } from "@shared/questions";
 import type { AnswerInput, ClientDecision, QuestionDef, TreatmentFlag } from "@shared/types";
-import { DECLARATION_TEXT, requiredDeclarations, type DeclarationKey } from "@shared/declarations";
+import { DECLARATION_HEADING, declarationText, requiredDeclarations, type DeclarationKey } from "@shared/declarations";
 import {
   getTreatments,
   getAppointmentByReference,
@@ -89,6 +89,7 @@ export default function ConsultationForm() {
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [forMinor, setForMinor] = useState(false);
+  const [clientUnder16, setClientUnder16] = useState<boolean | null>(null);
   const [guardianName, setGuardianName] = useState("");
   const [guardianRelationship, setGuardianRelationship] = useState("");
   const [ticked, setTicked] = useState<Set<DeclarationKey>>(new Set());
@@ -101,7 +102,6 @@ export default function ConsultationForm() {
   );
   const [legalName, setLegalName] = useState("");
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
-  const [signatureConfirmed, setSignatureConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [touchedProfileFields, setTouchedProfileFields] = useState<Set<string>>(new Set());
@@ -210,7 +210,8 @@ export default function ConsultationForm() {
       profileFieldErrors[q.key] = "Enter a valid phone number.";
     }
   }
-  const guardianComplete = !forMinor || (guardianName.trim().length > 1 && guardianRelationship.trim().length > 1);
+  const guardianComplete =
+    !forMinor || (guardianName.trim().length > 1 && guardianRelationship.trim().length > 1 && clientUnder16 !== null);
   const profileComplete = Object.keys(profileFieldErrors).length === 0 && guardianComplete;
 
   // Which treatment types the chosen services involve: drives which extra
@@ -240,25 +241,16 @@ export default function ConsultationForm() {
     .filter((q) => q.key !== "patch_test_changes" || answers.patch_test_done?.value === true)
     .every((q) => typeof answers[q.key]?.value === "boolean");
   const reviewFlagsComplete = decision !== null;
-  const declarationKeys = decision
-    ? requiredDeclarations({
-        decision,
-        doctorFlagged: flags.some((f) => f.outcome === "doctor"),
-        hasGuardian: forMinor,
-      })
-    : [];
+  const declarationKeys = decision ? requiredDeclarations({ hasGuardian: forMinor }) : [];
+  const declarationContext = { decision: decision ?? "continue", doctorFlagged: flags.some((f) => f.outcome === "doctor") };
   // Shown under the button so a client knows why they can't submit yet.
   const signatureMissing = [
-    declarationKeys.some((k) => !ticked.has(k)) && "tick every statement",
-    !signatureConfirmed && "tick the electronic signature box",
+    declarationKeys.some((k) => !ticked.has(k)) && `tick ${declarationKeys.length === 2 ? "both boxes" : "all three boxes"}`,
     legalName.trim().length <= 1 && "type your full name",
     !signatureDataUrl && "sign in the box",
   ].filter((m): m is string => !!m);
   const signatureComplete =
-    legalName.trim().length > 1 &&
-    signatureConfirmed &&
-    !!signatureDataUrl &&
-    declarationKeys.every((k) => ticked.has(k));
+    legalName.trim().length > 1 && !!signatureDataUrl && declarationKeys.every((k) => ticked.has(k));
   const serviceGroups = groupServicesByCategory(services);
 
   const canAdvance = useMemo(() => {
@@ -310,7 +302,9 @@ export default function ConsultationForm() {
         },
         answers: answerList,
         service_ids: selectedServiceIds,
-        guardian: forMinor ? { name: guardianName.trim(), relationship: guardianRelationship.trim() } : null,
+        guardian: forMinor
+          ? { name: guardianName.trim(), relationship: guardianRelationship.trim(), under_16: clientUnder16 === true }
+          : null,
       });
 
       setConsultationId(result.consultation_id);
@@ -368,6 +362,16 @@ export default function ConsultationForm() {
     }
     setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
   }
+
+  // Pre-fill the signing name (still editable) so it isn't typed twice.
+  useEffect(() => {
+    if (step !== "signature" || legalName) return;
+    const name = forMinor
+      ? guardianName.trim()
+      : `${(answers.first_name?.value as string) ?? ""} ${(answers.last_name?.value as string) ?? ""}`.trim();
+    if (name) setLegalName(name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   function goBack() {
     // Once phase 1 has run, going back to re-edit answers would desync the
@@ -447,7 +451,7 @@ export default function ConsultationForm() {
           })}
           <label className="kaaya-checkbox-row">
             <input type="checkbox" checked={forMinor} onChange={(e) => setForMinor(e.target.checked)} />
-            <span>The person having the treatment is under 16 (a parent or guardian must complete this form)</span>
+            <span>The person having the treatment is under 18 (a parent or guardian must complete this form)</span>
           </label>
           {forMinor && (
             <>
@@ -467,6 +471,17 @@ export default function ConsultationForm() {
                   value={guardianRelationship}
                   onChange={(e) => setGuardianRelationship(e.target.value)}
                 />
+              </div>
+              <div className="kaaya-field">
+                <label>Is the client under 16? *</label>
+                <div className="kaaya-yesno">
+                  <button type="button" aria-pressed={clientUnder16 === true} onClick={() => setClientUnder16(true)}>
+                    Yes
+                  </button>
+                  <button type="button" aria-pressed={clientUnder16 === false} onClick={() => setClientUnder16(false)}>
+                    No
+                  </button>
+                </div>
               </div>
             </>
           )}
@@ -694,17 +709,39 @@ export default function ConsultationForm() {
           <p style={{ marginTop: 0, color: "var(--kaaya-text-muted)", fontSize: "0.9rem" }}>
             You can change your mind and stop at any time, before or during your treatment.
           </p>
-          <p>Please tick each statement:</p>
-          {declarationKeys.map((key) => (
-            <label key={key} className="kaaya-checkbox-row">
-              <input type="checkbox" checked={ticked.has(key)} onChange={() => toggleDeclaration(key)} />
-              <span>{DECLARATION_TEXT[key]}</span>
-            </label>
+          <details className="kaaya-details">
+            <summary>Your treatment information</summary>
+            {flags.filter((f) => f.client_message).length > 0 ? (
+              <ul>
+                {flags
+                  .filter((f) => f.client_message)
+                  .map((f) => (
+                    <li key={f.id}>
+                      {f.outcome !== "warn" && <strong>{OUTCOME_LABEL[f.outcome]}</strong>}
+                      {f.client_message}
+                    </li>
+                  ))}
+              </ul>
+            ) : (
+              <p>Nothing in your answers needs extra attention for your chosen treatments.</p>
+            )}
+            <p>
+              Every treatment carries a small risk of redness, irritation or a reaction. Your therapist will go
+              through aftercare with you after your treatment.
+            </p>
+          </details>
+
+          {declarationKeys.map((key, i) => (
+            <div key={key}>
+              <h3 className="kaaya-declaration-heading">
+                {key === "guardian" ? DECLARATION_HEADING[key] : `${i + 1}. ${DECLARATION_HEADING[key]}`}
+              </h3>
+              <label className="kaaya-checkbox-row">
+                <input type="checkbox" checked={ticked.has(key)} onChange={() => toggleDeclaration(key)} />
+                <span>{declarationText(key, declarationContext)}</span>
+              </label>
+            </div>
           ))}
-          <label className="kaaya-checkbox-row">
-            <input type="checkbox" checked={signatureConfirmed} onChange={(e) => setSignatureConfirmed(e.target.checked)} />
-            <span>I agree that my electronic signature below counts as my signature on this form.</span>
-          </label>
           <div className="kaaya-field">
             <label htmlFor="legal_name">{forMinor ? "Parent or guardian's full name" : "Your full name"}</label>
             <input id="legal_name" type="text" value={legalName} onChange={(e) => setLegalName(e.target.value)} />

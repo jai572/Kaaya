@@ -26,7 +26,11 @@ export const consultationSubmissionSchema = z
     service_ids: z.array(z.string().uuid()).max(30).optional(),
     treatment_ids: z.array(z.string().uuid()).max(30).optional(),
     guardian: z
-      .object({ name: z.string().trim().min(2, "Guardian name is required"), relationship: z.string().trim().min(2).max(60) })
+      .object({
+        name: z.string().trim().min(2, "Guardian name is required"),
+        relationship: z.string().trim().min(2).max(60),
+        under_16: z.boolean({ required_error: "Say whether the client is under 16" }),
+      })
       .nullable()
       .optional(),
   })

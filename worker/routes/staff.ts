@@ -133,7 +133,7 @@ export async function getStaffConsultation(request: Request, env: Env, consultat
     .from("consultations")
     .select(
       `id, status, version, submitted_at, screened_at, reviewed_at, locked_at, valid_until, supersedes_consultation_id,
-       guardian_name, guardian_relationship,
+       guardian_name, guardian_relationship, client_under_16,
        clients(id, first_name, last_name, email, phone, address)`
     )
     .eq("id", consultationId)

@@ -539,3 +539,29 @@ button {
   text-align: center;
   margin: 16px 0 0;
 }
+
+.kaaya-details {
+  border: 1px solid var(--kaaya-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+}
+
+.kaaya-details summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.kaaya-details ul {
+  padding-left: 20px;
+}
+
+.kaaya-details li {
+  margin-bottom: 8px;
+}
+
+.kaaya-declaration-heading {
+  font-size: 1rem;
+  margin: 16px 0 0;
+}

@@ -53,6 +53,7 @@ type Detail = {
   treatments: { id: string; name: string; services?: string[] }[];
   guardian_name: string | null;
   guardian_relationship: string | null;
+  client_under_16: boolean | null;
   answers: Answer[];
   flags: Flag[];
   signature: {
@@ -263,7 +264,8 @@ export default function StaffConsultationDetail() {
         </p>
         {data.guardian_name && (
           <p>
-            <span className="kaaya-badge kaaya-badge--MEDIUM">Under 16</span> Completed and signed by{" "}
+            <span className="kaaya-badge kaaya-badge--MEDIUM">{data.client_under_16 === false ? "Under 18" : "Under 16"}</span>{" "}
+            Completed and signed by{" "}
             {data.guardian_name} ({data.guardian_relationship})
           </p>
         )}

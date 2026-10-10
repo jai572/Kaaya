@@ -5,7 +5,7 @@ import { consultationSubmissionSchema, validateAnswerCompleteness, finalizeConsu
 import { recordAuditEvent } from "../lib/audit";
 import { screenConsultation } from "../../shared/ruleEngine";
 import { ALL_QUESTIONS } from "../../shared/questions";
-import { DECLARATION_TEXT, DECLARATIONS_VERSION, requiredDeclarations, type DeclarationKey } from "../../shared/declarations";
+import { DECLARATIONS_VERSION, declarationText, requiredDeclarations, type DeclarationKey } from "../../shared/declarations";
 import type { TreatmentRuleRecord } from "../../shared/types";
 
 const QUESTION_META = new Map(ALL_QUESTIONS.map((q) => [q.key, { section: q.section, label: q.label }]));
@@ -147,6 +147,7 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
       supersedes_consultation_id: priorConsultation?.id ?? null,
       guardian_name: submission.guardian?.name ?? null,
       guardian_relationship: submission.guardian?.relationship ?? null,
+      client_under_16: submission.guardian ? submission.guardian.under_16 : null,
     })
     .select("id, access_token, version")
     .single();
@@ -226,8 +227,12 @@ export async function submitConsultation(request: Request, env: Env): Promise<Re
     .eq("active", true);
   if (rulesError) return errorResponse(rulesError.message, 500);
 
-  // Age isn't a question: a guardian filling the form in means under 16.
-  const screeningAnswers = [...submission.answers, { question_key: "under_16", answer_value: !!submission.guardian }];
+  // Age isn't a health question: a guardian completes the form for under-18s
+  // and says whether the client is under 16 (the tint manufacturers' limit).
+  const screeningAnswers = [
+    ...submission.answers,
+    { question_key: "under_16", answer_value: submission.guardian?.under_16 === true },
+  ];
   const result = screenConsultation(screeningAnswers, treatments, (rules ?? []) as unknown as TreatmentRuleRecord[]);
 
   // New-treatment-not-covered: a treatment requested now that wasn't part of
@@ -376,20 +381,20 @@ export async function finalizeConsultation(request: Request, env: Env, consultat
     .eq("consultation_id", consultationId);
   if (flagsError) return errorResponse(flagsError.message, 500);
 
-  // The client's own statements are what put responsibility for undisclosed
-  // information and informed risks on them, so they're required, not optional.
-  const required = requiredDeclarations({
+  // The client's confirmations (accurate information, informed consent,
+  // e-signature, guardian) are required, and stored with the exact wording.
+  const required = requiredDeclarations({ hasGuardian: !!consultation.guardian_name });
+  const declarationContext = {
     decision: input.decision,
     doctorFlagged: (flags ?? []).some((f) => f.outcome === "doctor"),
-    hasGuardian: !!consultation.guardian_name,
-  });
+  };
   const ticked = new Set(input.declarations);
   if (required.some((k) => !ticked.has(k))) {
     return errorResponse("Please tick every statement before signing");
   }
   const declarations = {
     version: DECLARATIONS_VERSION,
-    statements: required.map((key: DeclarationKey) => ({ key, text: DECLARATION_TEXT[key] })),
+    statements: required.map((key: DeclarationKey) => ({ key, text: declarationText(key, declarationContext) })),
   };
 
   const allFlagIds = new Set((flags ?? []).map((f) => f.id));
