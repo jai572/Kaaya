@@ -247,6 +247,13 @@ export default function ConsultationForm() {
         hasGuardian: forMinor,
       })
     : [];
+  // Shown under the button so a client knows why they can't submit yet.
+  const signatureMissing = [
+    declarationKeys.some((k) => !ticked.has(k)) && "tick every statement",
+    !signatureConfirmed && "tick the electronic signature box",
+    legalName.trim().length <= 1 && "type your full name",
+    !signatureDataUrl && "sign in the box",
+  ].filter((m): m is string => !!m);
   const signatureComplete =
     legalName.trim().length > 1 &&
     signatureConfirmed &&
@@ -707,6 +714,12 @@ export default function ConsultationForm() {
             <SignaturePad onChange={setSignatureDataUrl} />
           </div>
         </div>
+      )}
+
+      {step === "signature" && signatureMissing.length > 0 && (
+        <p className="kaaya-hint" role="status">
+          To submit, please {signatureMissing.join(", ")}.
+        </p>
       )}
 
       {error && (

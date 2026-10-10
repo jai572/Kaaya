@@ -411,6 +411,10 @@ button {
   height: 200px;
   display: block;
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
   border: 1px solid var(--kaaya-border);
   border-radius: 10px;
   background: #ffffff;
@@ -527,4 +531,11 @@ button {
 .kaaya-flag-outcome {
   display: block;
   margin-bottom: 4px;
+}
+
+.kaaya-hint {
+  color: var(--kaaya-text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+  margin: 16px 0 0;
 }
