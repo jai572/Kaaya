@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { isChunkLoadError, reloadForNewVersion } from "./lib/lazyWithReload";
 
 interface Props {
   children: ReactNode;
@@ -20,6 +21,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error) {
     console.error("Unhandled error", error);
+    if (isChunkLoadError(error)) reloadForNewVersion();
   }
 
   render() {
@@ -28,7 +30,11 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="kaaya-shell">
           <div className="kaaya-card">
             <h2 style={{ marginTop: 0 }}>Something went wrong</h2>
-            <p>Please refresh the page. If this keeps happening, contact Kaaya.</p>
+            {isChunkLoadError(this.state.error) ? (
+              <p>We've just updated the site. Please refresh the page. Anything you've already submitted has been saved.</p>
+            ) : (
+              <p>Please refresh the page. If this keeps happening, contact Kaaya.</p>
+            )}
             <p style={{ color: "var(--kaaya-text-muted)", fontSize: "0.85rem" }}>{this.state.error.message}</p>
           </div>
         </div>

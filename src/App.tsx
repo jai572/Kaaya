@@ -1,4 +1,5 @@
-import { Suspense, lazy } from "react";
+import { Suspense } from "react";
+import { lazyWithReload } from "./lib/lazyWithReload";
 import { Routes, Route } from "react-router-dom";
 import Home from "./pages/site/Home";
 import Treatments from "./pages/site/Treatments";
@@ -10,27 +11,27 @@ import NotFound from "./pages/site/NotFound";
 // The consultation/staff/booking modules pull in @supabase/supabase-js and
 // zod — meaningful weight a marketing-page visitor never needs. Lazy-loading
 // them keeps that cost off the brochure site's initial bundle.
-const ConsultationForm = lazy(() => import("./pages/consultation/ConsultationForm"));
-const ConsultationSubmitted = lazy(() => import("./pages/consultation/ConsultationSubmitted"));
-const ClientConsultationView = lazy(() => import("./pages/consultation/ClientConsultationView"));
-const StaffLogin = lazy(() => import("./pages/staff/StaffLogin"));
-const StaffLayout = lazy(() => import("./components/staff/StaffLayout"));
-const StaffConsultationList = lazy(() => import("./pages/staff/StaffConsultationList"));
-const StaffConsultationDetail = lazy(() => import("./pages/staff/StaffConsultationDetail"));
-const StaffServices = lazy(() => import("./pages/staff/StaffServices"));
-const StaffMembers = lazy(() => import("./pages/staff/StaffMembers"));
-const StaffFiles = lazy(() => import("./pages/staff/StaffFiles"));
-const StaffFileDetail = lazy(() => import("./pages/staff/StaffFileDetail"));
-const StaffRota = lazy(() => import("./pages/staff/StaffRota"));
-const StaffLocations = lazy(() => import("./pages/staff/StaffLocations"));
-const StaffBookings = lazy(() => import("./pages/staff/StaffBookings"));
-const StaffCalendar = lazy(() => import("./pages/staff/calendar/StaffCalendar"));
-const StaffSales = lazy(() => import("./pages/staff/StaffSales"));
-const StaffPermissions = lazy(() => import("./pages/staff/StaffPermissions"));
-const StaffClientRecord = lazy(() => import("./pages/staff/StaffClientRecord"));
-const BookingForm = lazy(() => import("./pages/booking/BookingForm"));
-const BookingConfirmed = lazy(() => import("./pages/booking/BookingConfirmed"));
-const ManageBooking = lazy(() => import("./pages/booking/ManageBooking"));
+const ConsultationForm = lazyWithReload(() => import("./pages/consultation/ConsultationForm"));
+const ConsultationSubmitted = lazyWithReload(() => import("./pages/consultation/ConsultationSubmitted"));
+const ClientConsultationView = lazyWithReload(() => import("./pages/consultation/ClientConsultationView"));
+const StaffLogin = lazyWithReload(() => import("./pages/staff/StaffLogin"));
+const StaffLayout = lazyWithReload(() => import("./components/staff/StaffLayout"));
+const StaffConsultationList = lazyWithReload(() => import("./pages/staff/StaffConsultationList"));
+const StaffConsultationDetail = lazyWithReload(() => import("./pages/staff/StaffConsultationDetail"));
+const StaffServices = lazyWithReload(() => import("./pages/staff/StaffServices"));
+const StaffMembers = lazyWithReload(() => import("./pages/staff/StaffMembers"));
+const StaffFiles = lazyWithReload(() => import("./pages/staff/StaffFiles"));
+const StaffFileDetail = lazyWithReload(() => import("./pages/staff/StaffFileDetail"));
+const StaffRota = lazyWithReload(() => import("./pages/staff/StaffRota"));
+const StaffLocations = lazyWithReload(() => import("./pages/staff/StaffLocations"));
+const StaffBookings = lazyWithReload(() => import("./pages/staff/StaffBookings"));
+const StaffCalendar = lazyWithReload(() => import("./pages/staff/calendar/StaffCalendar"));
+const StaffSales = lazyWithReload(() => import("./pages/staff/StaffSales"));
+const StaffPermissions = lazyWithReload(() => import("./pages/staff/StaffPermissions"));
+const StaffClientRecord = lazyWithReload(() => import("./pages/staff/StaffClientRecord"));
+const BookingForm = lazyWithReload(() => import("./pages/booking/BookingForm"));
+const BookingConfirmed = lazyWithReload(() => import("./pages/booking/BookingConfirmed"));
+const ManageBooking = lazyWithReload(() => import("./pages/booking/ManageBooking"));
 
 export default function App() {
   return (
